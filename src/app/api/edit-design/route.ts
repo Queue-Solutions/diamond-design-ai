@@ -1,0 +1,202 @@
+import { NextResponse } from "next/server";
+import { serverEnv } from "@/config/env";
+import { estimatedCosts } from "@/config/costs";
+import { ApiInputError, handleApiError, methodNotAllowed, parseJsonBody } from "@/lib/api-response";
+import { createDemoEditedConcept } from "@/lib/demo-data";
+import { normalizeDesignProfile } from "@/lib/design-profile";
+import { updateDesignProfileFromEdit } from "@/lib/edit-profile";
+import { requireRateLimit } from "@/lib/rate-limit";
+import {
+  getOrCreateDesignSession,
+  markUsageEventFailed,
+  markUsageEventSucceeded,
+  mapImageRecordToConcept,
+  persistDesignImage,
+  reserveImageCredit,
+  requireAuthenticatedUser,
+  storeImageFromUrl,
+  UsageReservationError
+} from "@/lib/supabase-server";
+import {
+  ImageGenerationError,
+  MissingImageApiTokenError,
+  ReplicateImageProvider,
+  buildEditPrompt
+} from "@/services/image";
+import type { DesignProfile } from "@/types/design";
+
+export const runtime = "nodejs";
+export const maxDuration = 180;
+
+type EditDesignBody = {
+  imageUrl?: string;
+  editInstruction?: string;
+  designProfile?: DesignProfile;
+  sourceImageId?: string;
+  sourceVersion?: number;
+  rootId?: string;
+  variationName?: string;
+  sessionId?: string;
+};
+
+export async function POST(request: Request) {
+  try {
+    const body = await parseJsonBody<EditDesignBody>(request);
+    const editInstruction = body.editInstruction?.trim() ?? "";
+
+    if (!body.imageUrl || !isValidUrl(body.imageUrl)) {
+      throw new ApiInputError("Please select a valid generated image to edit.");
+    }
+
+    if (!editInstruction) {
+      throw new ApiInputError("Describe the refinement you would like to make.");
+    }
+
+    if (!body.sourceImageId || !body.sourceVersion) {
+      throw new ApiInputError("The source image version could not be identified.");
+    }
+
+    const designProfile = normalizeDesignProfile(body.designProfile);
+    const updatedDesignProfile = updateDesignProfileFromEdit(designProfile, editInstruction);
+    const variationName = body.variationName?.trim() || "Edited Concept";
+    const prompt = buildEditPrompt({
+      designProfile: updatedDesignProfile,
+      editInstruction,
+      sourceVariationName: variationName
+    });
+
+    if (serverEnv.demoMode && !serverEnv.replicateApiToken) {
+      return NextResponse.json({
+        image: createDemoEditedConcept({
+          sourceImageId: body.sourceImageId,
+          sourceVersion: body.sourceVersion,
+          rootId: body.rootId || body.sourceImageId,
+          variationName,
+          editInstruction
+        }),
+        updatedDesignProfile,
+        demoMode: true
+      });
+    }
+
+    const auth = await requireAuthenticatedUser(request);
+    if (auth instanceof NextResponse) return auth;
+
+    const rateLimit = requireRateLimit(auth.user.id, "/api/edit-design", 5);
+    if (rateLimit) return rateLimit;
+
+    const sessionId = await getOrCreateDesignSession({
+      userId: auth.user.id,
+      sessionId: body.sessionId,
+      designProfile: updatedDesignProfile
+    });
+
+    const reservation = await reserveImageCredit({
+      userId: auth.user.id,
+      sessionId,
+      eventType: "image_edit",
+      provider: "replicate",
+      model: "black-forest-labs/flux-kontext-pro",
+      estimatedCost: estimatedCosts.replicateFluxKontextProEdit,
+      metadata: { sourceImageId: body.sourceImageId }
+    });
+    const startedAt = Date.now();
+    let record;
+
+    try {
+      const provider = new ReplicateImageProvider();
+      const image = await provider.editDesign({
+        imageUrl: body.imageUrl,
+        prompt,
+        editInstruction,
+        sourceImageId: body.sourceImageId,
+        sourceVersion: body.sourceVersion,
+        rootId: body.rootId || body.sourceImageId,
+        variationName
+      });
+      const stored = await storeImageFromUrl({
+        url: image.url,
+        userId: auth.user.id,
+        sessionId,
+        imageId: image.id
+      });
+      record = await persistDesignImage({
+        userId: auth.user.id,
+        sessionId,
+        concept: { ...image, url: stored.signedUrl },
+        type: "edited",
+        provider: "replicate",
+        model: "black-forest-labs/flux-kontext-pro",
+        storagePath: stored.storagePath
+      });
+
+      await markUsageEventSucceeded({
+        usageEventId: reservation.usageEventId,
+        designImageId: record.id,
+        latencyMs: Date.now() - startedAt,
+        metadata: { sourceImageId: body.sourceImageId, storagePath: stored.storagePath }
+      });
+    } catch (error) {
+      try {
+        await markUsageEventFailed({
+          usageEventId: reservation.usageEventId,
+          latencyMs: Date.now() - startedAt,
+          errorCode: error instanceof ImageGenerationError ? "IMAGE_PROVIDER_ERROR" : "IMAGE_FLOW_ERROR",
+          metadata: { sourceImageId: body.sourceImageId }
+        });
+      } catch (statusError) {
+        console.error("Reserved image edit usage event could not be marked failed.", statusError);
+      }
+
+      throw error;
+    }
+
+    return NextResponse.json({
+      image: await mapImageRecordToConcept(record),
+      updatedDesignProfile,
+      sessionId
+    });
+  } catch (error) {
+    if (error instanceof UsageReservationError) {
+      return NextResponse.json(
+        {
+          error: error.message,
+          remainingCredits: 0
+        },
+        { status: error.code.includes("USER_BLOCKED") ? 403 : 429 }
+      );
+    }
+
+    if (error instanceof MissingImageApiTokenError) {
+      return NextResponse.json(
+        {
+          error: error.message
+        },
+        { status: 503 }
+      );
+    }
+
+    if (error instanceof ImageGenerationError) {
+      return NextResponse.json({ error: error.message }, { status: 502 });
+    }
+
+    return handleApiError(error, "The design edit could not be completed. Please try again.");
+  }
+}
+
+export function GET() {
+  return methodNotAllowed();
+}
+
+function isValidUrl(value: string) {
+  if (/^data:image\/(png|jpe?g|webp);base64,/i.test(value)) {
+    return true;
+  }
+
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:";
+  } catch {
+    return false;
+  }
+}

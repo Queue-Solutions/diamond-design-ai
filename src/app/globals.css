@@ -1,0 +1,77 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: 0 0% 3%;
+  --foreground: 210 33% 96%;
+  --card: 220 12% 8%;
+  --card-foreground: 210 33% 96%;
+  --popover: 220 12% 8%;
+  --popover-foreground: 210 33% 96%;
+  --primary: 210 24% 90%;
+  --primary-foreground: 220 18% 7%;
+  --secondary: 220 10% 14%;
+  --secondary-foreground: 210 28% 92%;
+  --muted: 220 9% 13%;
+  --muted-foreground: 218 10% 64%;
+  --accent: 44 45% 72%;
+  --accent-foreground: 220 18% 7%;
+  --destructive: 0 72% 52%;
+  --destructive-foreground: 210 33% 96%;
+  --border: 220 12% 19%;
+  --input: 220 12% 18%;
+  --ring: 210 22% 82%;
+  color-scheme: dark;
+}
+
+* {
+  border-color: hsl(var(--border));
+}
+
+html {
+  min-height: 100%;
+  scroll-behavior: smooth;
+}
+
+body {
+  min-height: 100%;
+  background:
+    radial-gradient(circle at top left, rgba(201, 211, 223, 0.16), transparent 34rem),
+    radial-gradient(circle at 80% 15%, rgba(215, 196, 154, 0.12), transparent 28rem),
+    hsl(var(--background));
+  color: hsl(var(--foreground));
+  font-feature-settings: "rlig" 1, "calt" 1;
+}
+
+::selection {
+  background: rgba(215, 196, 154, 0.35);
+  color: #ffffff;
+}
+
+@layer utilities {
+  .glass-panel {
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.075), rgba(255, 255, 255, 0.025));
+    backdrop-filter: blur(22px);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 24px 80px rgba(0, 0, 0, 0.35);
+  }
+
+  .text-balance {
+    text-wrap: balance;
+  }
+}
+
+@media print {
+  body {
+    background: #ffffff !important;
+    color: #111111 !important;
+  }
+
+  header,
+  aside,
+  nav,
+  form,
+  button {
+    print-color-adjust: exact;
+  }
+}
