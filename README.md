@@ -106,6 +106,15 @@ Routes use centralized environment validation, input parsing, clear error respon
 4. Enable Email OTP / magic link auth in Supabase Auth.
 5. Create the `design-images` storage bucket if the migration was not run by a role allowed to manage storage buckets. Migration `004_private_storage.sql` makes this bucket private.
 
+Supabase Auth URL configuration:
+
+- Site URL: `https://diamond-design-ai.vercel.app`
+- Redirect URLs:
+  - `https://diamond-design-ai.vercel.app/**`
+  - `http://localhost:3000/**`
+
+Set `NEXT_PUBLIC_SITE_URL=https://diamond-design-ai.vercel.app` in Vercel so magic link emails use the production URL instead of localhost.
+
 The migration creates:
 
 - `profiles`

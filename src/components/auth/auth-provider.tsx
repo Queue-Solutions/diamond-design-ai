@@ -2,6 +2,7 @@
 
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import type { Session, SupabaseClient, User } from "@supabase/supabase-js";
+import { getPublicSiteUrl } from "@/config/public-env";
 import { createBrowserSupabaseClient } from "@/services/supabase/client";
 
 type AuthContextValue = {
@@ -53,7 +54,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const { error } = await supabase.auth.signInWithOtp({
       email,
       options: {
-        emailRedirectTo: typeof window !== "undefined" ? `${window.location.origin}/chat` : undefined
+        emailRedirectTo: `${getPublicSiteUrl()}/chat`
       }
     });
     if (error) throw error;
@@ -96,4 +97,3 @@ export function useAuth() {
 
   return value;
 }
-

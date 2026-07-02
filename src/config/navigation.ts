@@ -1,24 +1,28 @@
-import { Image, MessageSquareText, Plus, Settings } from "lucide-react";
+import { Gem, Image, Plus, UserRound } from "lucide-react";
 
 export const navigationItems = [
   {
-    title: "Chat History",
-    href: "/chat",
-    icon: MessageSquareText
-  },
-  {
     title: "New Design",
-    href: "/chat?new=true",
+    titleAr: "تصميم جديد",
+    href: "/chat",
     icon: Plus
   },
   {
-    title: "Saved Designs",
+    title: "My Designs",
+    titleAr: "تصاميمي",
     href: "/gallery",
     icon: Image
   },
   {
-    title: "Settings",
+    title: "Inspiration",
+    titleAr: "إلهام",
+    href: "/inspiration",
+    icon: Gem
+  },
+  {
+    title: "Profile",
+    titleAr: "الملف الشخصي",
     href: "/settings",
-    icon: Settings
+    icon: UserRound
   }
 ];

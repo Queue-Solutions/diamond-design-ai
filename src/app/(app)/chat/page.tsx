@@ -6,18 +6,15 @@ import { FormEvent, memo, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   AlertCircle,
-  ChevronDown,
   ChevronLeft,
   ChevronRight,
   Check,
   Columns2,
   Copy,
   Download,
-  Expand,
   Gem,
   Heart,
   ImagePlus,
-  Maximize2,
   Printer,
   SendHorizontal,
   Sparkles,
@@ -43,6 +40,7 @@ import { clearDiamondSession, loadDiamondSession, saveDiamondSession } from "@/l
 import { cn } from "@/lib/utils";
 import { publicEnv } from "@/config/public-env";
 import { BrowserLocalImageStorage, StorageValidationError, type StoredImage } from "@/services/storage";
+import { useLanguage } from "@/lib/language";
 import {
   type ChatApiResponse,
   type ChatMessage,
@@ -127,6 +125,7 @@ export default function ChatPage() {
   const [usage, setUsage] = useState<UsageState | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const imageRefreshInFlightRef = useRef(false);
+  const inspirationLoadedRef = useRef(false);
   const storage = useMemo(() => new BrowserLocalImageStorage(), []);
 
   const sortedConcepts = useMemo(
@@ -283,6 +282,52 @@ export default function ChatPage() {
       setSelectedConceptId(sortedConcepts[0].id);
     }
   }, [selectedConceptId, sortedConcepts]);
+
+  useEffect(() => {
+    if (!sessionLoaded || inspirationLoadedRef.current || typeof window === "undefined") return;
+
+    const params = new URLSearchParams(window.location.search);
+    const imageUrl = params.get("inspiration");
+    if (!imageUrl) return;
+
+    inspirationLoadedRef.current = true;
+    const title = params.get("title") || "Inspiration Reference";
+    const id = crypto.randomUUID();
+    const referenceConcept: GeneratedConcept = {
+      id,
+      url: imageUrl,
+      version: 1,
+      parentId: null,
+      rootId: id,
+      variationName: title,
+      description: "Reference selected from the inspiration library",
+      prompt: "",
+      editInstruction: "",
+      createdAt: new Date().toISOString()
+    };
+
+    setGeneratedConcepts((current) => [...current, referenceConcept]);
+    setSelectedConceptId(referenceConcept.id);
+    setDesignBrief(null);
+    setFinalizedConceptId("");
+    setMessages((current) => [
+      ...current,
+      {
+        id: crypto.randomUUID(),
+        role: "assistant",
+        content: `I've brought "${title}" into the atelier as a reference. Tell me what you would like to keep, change, or refine from it.`,
+        createdAt: new Date().toISOString()
+      }
+    ]);
+    setDesignProfile((current) =>
+      normalizeDesignProfile({
+        ...current,
+        notes: [...current.notes, `Inspiration reference: ${title}`],
+        readyForGeneration: current.readyForGeneration
+      })
+    );
+    window.history.replaceState({}, "", window.location.pathname);
+  }, [sessionLoaded]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -631,59 +676,51 @@ export default function ChatPage() {
   }
 
   return (
-    <div className="min-h-[calc(100vh-5rem)] space-y-5">
-      <WorkspaceHeader
-        stage={stage}
-        completion={completion}
-          comparisonCount={comparisonConcepts.length}
-          demoMode={isDemoMode}
-          usage={usage}
-          isSignedIn={Boolean(user)}
-          onCompare={() => setComparisonOpen(true)}
-          onUpload={() => setUploadOpen(true)}
-          onReset={resetSession}
-      />
+    <div className="relative min-h-[calc(100vh-5rem)]">
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-[34rem] rounded-[3rem] bg-[radial-gradient(circle_at_45%_0%,rgba(215,196,154,0.16),transparent_34rem)]" />
 
       {error ? <LuxuryAlert message={error} onRetry={() => setError("")} /> : null}
 
-      <div className="grid gap-5 2xl:grid-cols-[22rem_minmax(0,1fr)_24rem]">
-        <ConversationPanel
-          messages={messages}
-          input={input}
-          isSending={isSending}
-          suggestions={suggestedActions}
-          onInputChange={setInput}
-          onSubmit={handleSubmit}
-          onSuggestion={(action) => void sendMessage(action)}
-          onUpload={() => setUploadOpen(true)}
-          scrollRef={scrollRef}
-        />
-
-        <DesignCanvas
-          activeConcept={activeConcept}
-          concepts={sortedConcepts}
-          isGenerating={isGenerating}
-          favoriteIds={favoriteIds}
-          comparisonIds={comparisonIds}
-          usage={usage}
-          isSignedIn={Boolean(user)}
-          onSelect={setSelectedConceptId}
-          onGenerate={() => void generateConcepts()}
-          onEdit={(concept) => {
-            setSelectedConcept(concept);
-            setEditInstruction("");
-          }}
-          onFinalize={setFinalizeCandidate}
-          onCreateRevision={createNewRevision}
-          onPreview={setPreviewConcept}
-          onFavorite={toggleFavorite}
-          onCompare={toggleCompare}
-          onUpload={() => setUploadOpen(true)}
-          onImageError={() => void refreshSessionImages()}
-          readyForGeneration={designProfile.readyForGeneration}
-          finalizedConceptId={finalizedConceptId}
-          revisionUnlockedIds={revisionUnlockedIds}
-        />
+      <div className="relative grid gap-6 xl:grid-cols-[minmax(0,1fr)_23rem]">
+        <div className="space-y-6">
+          <ConversationPanel
+            messages={messages}
+            input={input}
+            isSending={isSending}
+            isGenerating={isGenerating}
+            suggestions={suggestedActions}
+            concepts={sortedConcepts}
+            activeConceptId={activeConcept?.id ?? ""}
+            favoriteIds={favoriteIds}
+            comparisonIds={comparisonIds}
+            finalizedConceptId={finalizedConceptId}
+            revisionUnlockedIds={revisionUnlockedIds}
+            usage={usage}
+            stage={stage}
+            completion={completion}
+            demoMode={isDemoMode}
+            isSignedIn={Boolean(user)}
+            onInputChange={setInput}
+            onSubmit={handleSubmit}
+            onSuggestion={(action) => void sendMessage(action)}
+            onUpload={() => setUploadOpen(true)}
+            onReset={resetSession}
+            onSelect={setSelectedConceptId}
+            onGenerate={() => void generateConcepts()}
+            onEdit={(concept) => {
+              setSelectedConcept(concept);
+              setEditInstruction("");
+            }}
+            onFinalize={setFinalizeCandidate}
+            onCreateRevision={createNewRevision}
+            onPreview={setPreviewConcept}
+            onFavorite={toggleFavorite}
+            onCompareImage={toggleCompare}
+            onImageError={() => void refreshSessionImages()}
+            readyForGeneration={designProfile.readyForGeneration}
+            scrollRef={scrollRef}
+          />
+        </div>
 
         <StudioPanel
           profile={designProfile}
@@ -800,76 +837,6 @@ export default function ChatPage() {
   );
 }
 
-function WorkspaceHeader({
-  stage,
-  completion,
-  comparisonCount,
-  demoMode,
-  usage,
-  isSignedIn,
-  onCompare,
-  onUpload,
-  onReset
-}: {
-  stage: ConversationStage;
-  completion: number;
-  comparisonCount: number;
-  demoMode: boolean;
-  usage: UsageState | null;
-  isSignedIn: boolean;
-  onCompare: () => void;
-  onUpload: () => void;
-  onReset: () => void;
-}) {
-  return (
-    <motion.header
-      initial={{ opacity: 0, y: -8 }}
-      animate={{ opacity: 1, y: 0 }}
-      className="flex flex-col gap-4 rounded-3xl border bg-card/70 p-5 shadow-luxury backdrop-blur-xl lg:flex-row lg:items-center lg:justify-between"
-    >
-      <div>
-        <p className="text-sm text-muted-foreground">Diamond design workspace</p>
-        <h1 className="mt-2 text-3xl font-semibold text-white">Atelier Concept Studio</h1>
-      </div>
-      <div className="flex flex-wrap items-center gap-3">
-        <div className="rounded-full border bg-white/[0.04] px-4 py-2 text-sm text-muted-foreground">
-          {completion}% Design Complete
-        </div>
-        <div className="rounded-full border border-diamond-champagne/30 bg-diamond-champagne/10 px-4 py-2 text-sm text-white">
-          {statusLabel(stage)}
-        </div>
-        {demoMode ? (
-          <div className="rounded-full border border-diamond-champagne/30 bg-diamond-champagne/10 px-4 py-2 text-sm text-white">
-            Demo Mode
-          </div>
-        ) : null}
-        {isSignedIn && usage ? (
-          <div className="rounded-2xl border bg-white/[0.04] px-4 py-2 text-xs leading-5 text-muted-foreground">
-            <p>{usage.dailyRemaining} / {usage.dailyLimit} daily image credits remaining</p>
-            <p>{usage.monthlyRemaining} / {usage.monthlyLimit} monthly image credits remaining</p>
-          </div>
-        ) : (
-          <div className="rounded-2xl border border-diamond-champagne/30 bg-diamond-champagne/10 px-4 py-2 text-xs leading-5 text-white">
-            Sign in to save your designs and generate AI concepts.
-          </div>
-        )}
-        <Button variant="secondary" disabled={comparisonCount !== 2} onClick={onCompare}>
-          <Columns2 className="h-4 w-4" />
-          Compare
-        </Button>
-        <Button variant="secondary" onClick={onUpload}>
-          <Upload className="h-4 w-4" />
-          Upload Reference
-        </Button>
-        <Button onClick={onReset}>
-          <Plus className="h-4 w-4" />
-          New Design
-        </Button>
-      </div>
-    </motion.header>
-  );
-}
-
 function LuxuryAlert({ message, onRetry }: { message: string; onRetry: () => void }) {
   return (
     <motion.div
@@ -893,72 +860,217 @@ function ConversationPanel({
   messages,
   input,
   isSending,
+  isGenerating,
   suggestions,
+  concepts,
+  activeConceptId,
+  favoriteIds,
+  comparisonIds,
+  finalizedConceptId,
+  revisionUnlockedIds,
+  usage,
+  stage,
+  completion,
+  demoMode,
+  isSignedIn,
   onInputChange,
   onSubmit,
   onSuggestion,
   onUpload,
+  onReset,
+  onSelect,
+  onGenerate,
+  onEdit,
+  onFinalize,
+  onCreateRevision,
+  onPreview,
+  onFavorite,
+  onCompareImage,
+  onImageError,
+  readyForGeneration,
   scrollRef
 }: {
   messages: ChatMessage[];
   input: string;
   isSending: boolean;
+  isGenerating: boolean;
   suggestions: string[];
+  concepts: GeneratedConcept[];
+  activeConceptId: string;
+  favoriteIds: Set<string>;
+  comparisonIds: string[];
+  finalizedConceptId: string;
+  revisionUnlockedIds: Set<string>;
+  usage: UsageState | null;
+  stage: ConversationStage;
+  completion: number;
+  demoMode: boolean;
+  isSignedIn: boolean;
   onInputChange: (value: string) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
   onSuggestion: (value: string) => void;
   onUpload: () => void;
+  onReset: () => void;
+  onSelect: (id: string) => void;
+  onGenerate: () => void;
+  onEdit: (concept: GeneratedConcept) => void;
+  onFinalize: (concept: GeneratedConcept) => void;
+  onCreateRevision: (concept: GeneratedConcept) => void;
+  onPreview: (concept: GeneratedConcept) => void;
+  onFavorite: (id: string) => void;
+  onCompareImage: (id: string) => void;
+  onImageError: () => void;
+  readyForGeneration: boolean;
   scrollRef: React.RefObject<HTMLDivElement | null>;
 }) {
   const lastAssistantId = [...messages].reverse().find((message) => message.role === "assistant")?.id;
+  const aiDisabled = !isSignedIn || Boolean(usage && (usage.dailyRemaining <= 0 || usage.monthlyRemaining <= 0));
+  const { t } = useLanguage();
+  const stageText = t(
+    statusLabel(stage),
+    stage === "ready_to_generate" ? "جاهز للإنشاء" : stage === "refinement" ? "قيد التنقيح" : "مرحلة الاستكشاف"
+  );
 
   return (
-    <motion.section initial={{ opacity: 0, x: -12 }} animate={{ opacity: 1, x: 0 }} className="min-h-[42rem] rounded-3xl border bg-card/70 shadow-luxury backdrop-blur-xl">
-      <div className="border-b p-5">
-        <p className="text-sm text-muted-foreground">AI consultant</p>
-        <h2 className="mt-1 text-lg font-semibold text-white">Private Design Consultation</h2>
-      </div>
-      <div className="flex h-[34rem] flex-col gap-5 overflow-y-auto p-5">
-        <AnimatePresence initial={false}>
-          {messages.map((message) => (
-            <ChatBubble key={message.id} message={message} stream={message.id === lastAssistantId} />
-          ))}
-        </AnimatePresence>
-        {isSending ? <TypingIndicator /> : null}
-        <div ref={scrollRef} />
-      </div>
-      <div className="min-w-0 border-t p-4">
-        <div className="mb-4 flex max-w-full flex-wrap gap-2 overflow-hidden">
-          {suggestions.map((action) => (
-            <Button
-              key={action}
-              type="button"
-              variant="ghost"
-              size="sm"
-              disabled={isSending}
-              className="max-w-full whitespace-normal break-words rounded-2xl px-3 py-2 text-left leading-5"
-              onClick={() => onSuggestion(action)}
-            >
-              <span className="line-clamp-2 max-w-[15rem]">{action}</span>
-            </Button>
-          ))}
+    <motion.section
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="relative overflow-hidden rounded-[2rem] bg-[#0c0c0b] shadow-[inset_0_1px_0_rgba(215,196,154,0.14),0_30px_110px_rgba(0,0,0,0.48)]"
+    >
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_18%_0%,rgba(215,196,154,0.11),transparent_25rem)]" />
+      <div className="absolute inset-x-10 top-0 h-px bg-gradient-to-r from-transparent via-diamond-champagne/35 to-transparent" />
+
+      <div className="relative grid gap-7 p-6 md:p-8 xl:grid-cols-[16rem_minmax(0,1fr)]">
+        <div className="flex flex-col justify-between gap-8 border-b border-diamond-champagne/10 pb-6 xl:border-b-0 xl:border-r xl:pb-0 xl:pr-7">
+          <div>
+            <div className="mb-6 inline-flex items-center gap-2 rounded-full bg-white/[0.035] px-4 py-2 text-xs uppercase tracking-[0.24em] text-diamond-champagne/75 shadow-[inset_0_0_0_1px_rgba(215,196,154,0.10)]">
+                <Sparkles className="h-3.5 w-3.5" />
+                {t("Concierge AI", "مساعد الأتيليه")}
+            </div>
+
+            <h1 className="font-display text-balance text-4xl font-medium leading-tight text-diamond-pearl md:text-5xl xl:text-4xl">
+              {t("Private design consultation.", "استشارة تصميم خاصة.")}
+            </h1>
+            <p className="mt-5 text-sm leading-7 text-diamond-smoke">
+              {t(
+                "Begin with the occasion, stone, metal, or a reference. The agent will quietly shape the brief before any image is generated.",
+                "ابدأ بالمناسبة أو الحجر أو المعدن أو مرجع بصري. سيقوم المساعد بتشكيل الملخص بهدوء قبل إنشاء أي صورة."
+              )}
+            </p>
+          </div>
+
+          <div className="space-y-4">
+            <div className="grid gap-2 text-xs text-muted-foreground">
+              <div className="flex items-center justify-between rounded-full bg-white/[0.03] px-4 py-2 shadow-[inset_0_0_0_1px_rgba(215,196,154,0.09)]">
+                <span>{t("Progress", "التقدم")}</span>
+                <span className="text-diamond-pearl">{completion}%</span>
+              </div>
+              <div className="flex items-center justify-between rounded-full bg-white/[0.03] px-4 py-2 shadow-[inset_0_0_0_1px_rgba(215,196,154,0.09)]">
+                <span>{t("Status", "الحالة")}</span>
+                <span className="text-diamond-pearl">{stageText}</span>
+              </div>
+              {demoMode ? (
+                <div className="rounded-full bg-diamond-champagne/10 px-4 py-2 text-diamond-pearl shadow-[inset_0_0_0_1px_rgba(215,196,154,0.16)]">
+                  {t("Demo mode", "وضع العرض")}
+                </div>
+              ) : null}
+              {isSignedIn && usage ? (
+                <div className="rounded-full bg-white/[0.03] px-4 py-2 shadow-[inset_0_0_0_1px_rgba(215,196,154,0.09)]">
+                  {usage.dailyRemaining} daily / {usage.monthlyRemaining} monthly credits
+                </div>
+              ) : (
+                <div className="rounded-2xl bg-diamond-champagne/[0.08] px-4 py-3 leading-5 text-diamond-pearl shadow-[inset_0_0_0_1px_rgba(215,196,154,0.13)]">
+                  {t("Sign in to save designs and generate AI concepts.", "سجل الدخول لحفظ التصاميم وإنشاء تصورات بالذكاء الاصطناعي.")}
+                </div>
+              )}
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              <Button variant="secondary" onClick={onUpload}>
+                <Upload className="h-4 w-4" />
+                {t("Upload Reference", "رفع مرجع")}
+              </Button>
+              <Button onClick={onReset}>
+                <Plus className="h-4 w-4" />
+                {t("New Design", "تصميم جديد")}
+              </Button>
+            </div>
+          </div>
         </div>
-        <form onSubmit={onSubmit} className="flex items-center gap-3 rounded-2xl border bg-background/70 p-2">
-          <Button size="icon" variant="ghost" aria-label="Upload reference image" type="button" onClick={onUpload}>
-            <ImagePlus className="h-5 w-5" />
-          </Button>
-          <input
-            value={input}
-            onChange={(event) => onInputChange(event.target.value)}
-            disabled={isSending}
-            className="h-11 min-w-0 flex-1 bg-transparent px-2 text-sm outline-none placeholder:text-muted-foreground disabled:opacity-60"
-            placeholder="Describe your ideal piece..."
-            aria-label="Message the diamond consultant"
-          />
-          <Button size="icon" aria-label="Send message" disabled={isSending || !input.trim()}>
-            {isSending ? <Sparkles className="h-5 w-5 animate-pulse" /> : <SendHorizontal className="h-5 w-5" />}
-          </Button>
-        </form>
+
+        <div className="flex min-h-[42rem] flex-col">
+          <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <p className="text-xs uppercase tracking-[0.26em] text-diamond-champagne/70">{t("Master designer", "المصمم الرئيسي")}</p>
+              <h2 className="mt-1 font-display text-3xl font-medium text-diamond-pearl">{t("Atelier conversation", "محادثة الأتيليه")}</h2>
+            </div>
+            <Gem className="h-5 w-5 text-diamond-champagne/75" />
+          </div>
+
+          <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto rounded-[1.4rem] bg-[#070707]/62 p-5 shadow-[inset_0_0_0_1px_rgba(215,196,154,0.07),inset_0_1px_20px_rgba(255,255,255,0.015)]">
+            <AnimatePresence initial={false}>
+              {messages.map((message) => (
+                <ChatBubble key={message.id} message={message} stream={message.id === lastAssistantId} />
+              ))}
+            </AnimatePresence>
+            {isSending ? <TypingIndicator /> : null}
+            <ChatImageStudies
+              concepts={concepts}
+              activeConceptId={activeConceptId}
+              favoriteIds={favoriteIds}
+              comparisonIds={comparisonIds}
+              finalizedConceptId={finalizedConceptId}
+              revisionUnlockedIds={revisionUnlockedIds}
+              isGenerating={isGenerating}
+              readyForGeneration={readyForGeneration}
+              aiDisabled={aiDisabled}
+              onSelect={onSelect}
+              onGenerate={onGenerate}
+              onUpload={onUpload}
+              onEdit={onEdit}
+              onFinalize={onFinalize}
+              onCreateRevision={onCreateRevision}
+              onPreview={onPreview}
+              onFavorite={onFavorite}
+              onCompare={onCompareImage}
+              onImageError={onImageError}
+            />
+            <div ref={scrollRef} />
+          </div>
+
+          <div className="mt-4 flex max-w-full flex-wrap gap-2 overflow-hidden">
+            {suggestions.map((action) => (
+              <Button
+                key={action}
+                type="button"
+                variant="ghost"
+                size="sm"
+                disabled={isSending}
+                className="max-w-full whitespace-normal break-words rounded-full bg-white/[0.025] px-4 py-2 text-left leading-5 shadow-[inset_0_0_0_1px_rgba(215,196,154,0.07)]"
+                onClick={() => onSuggestion(action)}
+              >
+                <span className="line-clamp-2 max-w-[15rem]">{translateSuggestion(action, t)}</span>
+              </Button>
+            ))}
+          </div>
+
+          <form onSubmit={onSubmit} className="mt-4 flex items-center gap-3 rounded-[1.25rem] bg-[#050505]/92 p-2 shadow-[inset_0_0_0_1px_rgba(215,196,154,0.13),inset_0_10px_30px_rgba(0,0,0,0.38)]">
+            <Button size="icon" variant="ghost" aria-label="Upload reference image" type="button" onClick={onUpload}>
+              <ImagePlus className="h-5 w-5" />
+            </Button>
+            <input
+              value={input}
+              onChange={(event) => onInputChange(event.target.value)}
+              disabled={isSending}
+            className="h-11 min-w-0 flex-1 bg-transparent px-2 text-sm outline-none placeholder:text-muted-foreground focus-visible:shadow-none disabled:opacity-60"
+              placeholder={t("Describe your dream jewelry...", "صف المجوهرات التي تتخيلها...")}
+              aria-label="Message the diamond consultant"
+            />
+            <Button size="icon" aria-label="Send message" disabled={isSending || !input.trim()}>
+              {isSending ? <Sparkles className="h-5 w-5 animate-pulse" /> : <SendHorizontal className="h-5 w-5" />}
+            </Button>
+          </form>
+        </div>
       </div>
     </motion.section>
   );
@@ -966,6 +1078,14 @@ function ConversationPanel({
 
 const ChatBubble = memo(function ChatBubble({ message, stream }: { message: ChatMessage; stream: boolean }) {
   const isAssistant = message.role === "assistant";
+  const { t } = useLanguage();
+  const content =
+    message.content === initialAssistantMessage.content
+      ? t(
+          initialAssistantMessage.content,
+          "مرحباً بك في أتيليه الألماس الخاص بك. أخبرني بالقطعة التي تتخيلها، أو ابدأ بالمناسبة والمعدن وشكل الألماس."
+        )
+      : message.content;
 
   return (
     <motion.div
@@ -976,18 +1096,18 @@ const ChatBubble = memo(function ChatBubble({ message, stream }: { message: Chat
       className={cn("flex gap-4", isAssistant ? "justify-start" : "justify-end")}
     >
       {isAssistant ? (
-        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-glow">
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-diamond-champagne shadow-[inset_0_0_0_1px_rgba(215,196,154,0.24),0_12px_30px_rgba(0,0,0,0.28)]">
           <Gem className="h-5 w-5" />
         </div>
       ) : null}
       <div
         className={cn(
-          "max-w-[92%] rounded-2xl border p-4 text-sm md:max-w-[85%]",
-          isAssistant ? "bg-card text-card-foreground" : "border-white/10 bg-white/[0.06] text-white"
+          "max-w-[92%] rounded-[1.35rem] p-5 text-sm leading-7 md:max-w-[85%]",
+          isAssistant ? "bg-black/35 text-card-foreground shadow-[inset_0_0_0_1px_rgba(215,196,154,0.08)]" : "bg-diamond-champagne/[0.09] text-diamond-pearl shadow-[inset_0_0_0_1px_rgba(215,196,154,0.14)]"
         )}
       >
-        <p className="text-xs text-muted-foreground">{formatTime(message.createdAt)}</p>
-        {stream && isAssistant ? <StreamingMessage content={message.content} /> : <RichMessage content={message.content} />}
+        <p className="text-[0.68rem] uppercase tracking-[0.22em] text-diamond-champagne/55">{formatTime(message.createdAt)}</p>
+        {stream && isAssistant ? <StreamingMessage content={content} /> : <RichMessage content={content} />}
       </div>
     </motion.div>
   );
@@ -1043,11 +1163,11 @@ function renderInlineMarkdown(text: string) {
 function TypingIndicator() {
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex gap-4">
-      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-glow">
+      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-diamond-champagne shadow-[inset_0_0_0_1px_rgba(215,196,154,0.24),0_12px_30px_rgba(0,0,0,0.28)]">
         <Sparkles className="h-5 w-5 animate-pulse" />
       </div>
-      <div className="w-full max-w-md rounded-2xl border bg-card p-5">
-        <p className="mb-3 text-sm text-muted-foreground">Consulting our AI designer...</p>
+      <div className="w-full max-w-md rounded-[1.35rem] bg-black/35 p-5 shadow-[inset_0_0_0_1px_rgba(215,196,154,0.08)]">
+        <p className="mb-3 text-sm text-muted-foreground">Crafting inspiration...</p>
         <LoadingSkeleton className="mb-3 h-4 w-2/3" />
         <LoadingSkeleton className="h-4 w-1/2" />
       </div>
@@ -1055,320 +1175,19 @@ function TypingIndicator() {
   );
 }
 
-function DesignCanvas({
-  activeConcept,
-  concepts,
-  isGenerating,
-  favoriteIds,
-  comparisonIds,
-  usage,
-  isSignedIn,
-  readyForGeneration,
-  onSelect,
-  onGenerate,
-  onEdit,
-  onFinalize,
-  onCreateRevision,
-  onPreview,
-  onFavorite,
-  onCompare,
-  onUpload,
-  onImageError,
-  finalizedConceptId,
-  revisionUnlockedIds
-}: {
-  activeConcept: GeneratedConcept | null;
-  concepts: GeneratedConcept[];
-  isGenerating: boolean;
-  favoriteIds: Set<string>;
-  comparisonIds: string[];
-  usage: UsageState | null;
-  isSignedIn: boolean;
-  readyForGeneration: boolean;
-  onSelect: (id: string) => void;
-  onGenerate: () => void;
-  onEdit: (concept: GeneratedConcept) => void;
-  onFinalize: (concept: GeneratedConcept) => void;
-  onCreateRevision: (concept: GeneratedConcept) => void;
-  onPreview: (concept: GeneratedConcept) => void;
-  onFavorite: (id: string) => void;
-  onCompare: (id: string) => void;
-  onUpload: () => void;
-  onImageError: () => void;
-  finalizedConceptId: string;
-  revisionUnlockedIds: Set<string>;
-}) {
-  const activeFinalized = Boolean(activeConcept && activeConcept.id === finalizedConceptId);
-  const canEditActive = Boolean(activeConcept && (!activeFinalized || revisionUnlockedIds.has(activeConcept.id)));
-  const limitReached = Boolean(usage && (usage.dailyRemaining <= 0 || usage.monthlyRemaining <= 0));
-  const aiDisabled = !isSignedIn || limitReached;
-
-  return (
-    <motion.main initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-5">
-      <section className="relative min-h-[42rem] overflow-hidden rounded-3xl border bg-black/45 shadow-luxury">
-        <div className="absolute inset-0 bg-diamond-radial opacity-80" />
-        {activeConcept ? (
-          <AnimatePresence mode="wait">
-            <motion.div
-              key={activeConcept.id}
-              initial={{ opacity: 0, scale: 0.985 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.985 }}
-              transition={{ duration: 0.25 }}
-              className="relative flex min-h-[42rem] flex-col"
-            >
-              <div className="flex items-center justify-between gap-3 border-b bg-black/25 p-4 backdrop-blur-xl">
-                <div>
-                  <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Primary canvas</p>
-                  <h2 className="mt-1 text-xl font-semibold text-white">
-                    V{activeConcept.version} - {activeConcept.variationName}
-                  </h2>
-                </div>
-                <div className="flex flex-wrap justify-end gap-2">
-                  {activeFinalized ? (
-                    <div className="flex items-center gap-2 rounded-full border border-diamond-champagne/40 bg-diamond-champagne/15 px-4 py-2 text-sm text-white">
-                      <Check className="h-4 w-4 text-diamond-champagne" />
-                      Final Design
-                    </div>
-                  ) : (
-                    <Button variant="secondary" onClick={() => onFinalize(activeConcept)}>
-                      <Check className="h-4 w-4" />
-                      Finalize
-                    </Button>
-                  )}
-                  <Button size="icon" variant="ghost" aria-label="Favorite concept" onClick={() => onFavorite(activeConcept.id)}>
-                    <Heart className={cn("h-4 w-4", favoriteIds.has(activeConcept.id) && "fill-diamond-champagne text-diamond-champagne")} />
-                  </Button>
-                  <Button size="icon" variant="ghost" aria-label="Open fullscreen preview" onClick={() => onPreview(activeConcept)}>
-                    <Maximize2 className="h-4 w-4" />
-                  </Button>
-                  {activeFinalized && !canEditActive ? (
-                    <Button variant="secondary" onClick={() => onCreateRevision(activeConcept)}>
-                      <Wand2 className="h-4 w-4" />
-                      Create New Revision
-                    </Button>
-                  ) : (
-                    <Button variant="secondary" disabled={aiDisabled} onClick={() => onEdit(activeConcept)}>
-                      <Wand2 className="h-4 w-4" />
-                      Edit
-                    </Button>
-                  )}
-                </div>
-              </div>
-              <button
-                type="button"
-                className="group relative flex flex-1 items-center justify-center p-8 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                onClick={() => onPreview(activeConcept)}
-                aria-label="Open image preview"
-              >
-                <div className="absolute inset-10 rounded-[2rem] bg-white/10 blur-3xl transition group-hover:bg-white/15" />
-                <img
-                  src={activeConcept.url}
-                  alt={activeConcept.variationName}
-                  loading="lazy"
-                  onError={onImageError}
-                  className="relative max-h-[34rem] w-auto rounded-[2rem] border object-contain shadow-[0_40px_120px_rgba(0,0,0,0.65)] transition duration-300 group-hover:scale-[1.015]"
-                />
-              </button>
-            </motion.div>
-          </AnimatePresence>
-        ) : (
-          <CanvasEmptyState
-            isGenerating={isGenerating}
-            readyForGeneration={readyForGeneration}
-            usage={usage}
-            isSignedIn={isSignedIn}
-            onGenerate={onGenerate}
-            onUpload={onUpload}
-          />
-        )}
-      </section>
-
-      <ConceptGallery
-        concepts={concepts}
-        activeConceptId={activeConcept?.id ?? ""}
-        favoriteIds={favoriteIds}
-        comparisonIds={comparisonIds}
-        usage={usage}
-        isSignedIn={isSignedIn}
-        onImageError={onImageError}
-        finalizedConceptId={finalizedConceptId}
-        revisionUnlockedIds={revisionUnlockedIds}
-        isGenerating={isGenerating}
-        onSelect={onSelect}
-        onEdit={onEdit}
-        onFinalize={onFinalize}
-        onCreateRevision={onCreateRevision}
-        onPreview={onPreview}
-        onFavorite={onFavorite}
-        onCompare={onCompare}
-      />
-    </motion.main>
-  );
-}
-
-function CanvasEmptyState({
-  isGenerating,
-  readyForGeneration,
-  usage,
-  isSignedIn,
-  onGenerate,
-  onUpload
-}: {
-  isGenerating: boolean;
-  readyForGeneration: boolean;
-  usage: UsageState | null;
-  isSignedIn: boolean;
-  onGenerate: () => void;
-  onUpload: () => void;
-}) {
-  const limitReached = Boolean(usage && (usage.dailyRemaining <= 0 || usage.monthlyRemaining <= 0));
-  const disabledReason = !isSignedIn
-    ? "Sign in to save your designs and generate AI concepts."
-    : limitReached
-      ? "You've reached today's AI image limit. Please try again tomorrow."
-      : "";
-
-  return (
-    <div className="relative flex min-h-[42rem] items-center justify-center p-8 text-center">
-      <div className="absolute inset-10 rounded-[2rem] border border-white/10 bg-white/[0.025]" />
-      <div className="relative max-w-md">
-        <div className="mx-auto mb-6 flex h-20 w-20 items-center justify-center rounded-full border bg-white/[0.06] text-diamond-champagne shadow-glow">
-          {isGenerating ? <Sparkles className="h-8 w-8 animate-pulse" /> : <Gem className="h-8 w-8" />}
-        </div>
-        <h2 className="text-2xl font-semibold text-white">
-          {isGenerating ? "Designing your diamond concepts..." : "Your primary concept will appear here"}
-        </h2>
-        <p className="mt-3 text-sm leading-6 text-muted-foreground">
-          {readyForGeneration
-            ? "Generate the first visual direction, then refine the selected concept through the atelier workspace."
-            : "Continue the consultation until the direction is clear enough for image concepts."}
-        </p>
-        {readyForGeneration ? (
-          <div className="mt-6 flex flex-col justify-center gap-3 sm:flex-row">
-            <Button disabled={isGenerating || Boolean(disabledReason)} onClick={onGenerate}>
-              {isGenerating ? <Sparkles className="h-4 w-4 animate-pulse" /> : <Wand2 className="h-4 w-4" />}
-              Generate Diamond Concept
-            </Button>
-            <Button variant="secondary" onClick={onUpload}>
-              <Upload className="h-4 w-4" />
-              Upload Existing Design
-            </Button>
-          </div>
-        ) : (
-          <Button className="mt-6" variant="secondary" onClick={onUpload}>
-            <Upload className="h-4 w-4" />
-            Upload Existing Design
-          </Button>
-        )}
-        {disabledReason ? <p className="mt-4 text-sm leading-6 text-diamond-champagne">{disabledReason}</p> : null}
-        {isSignedIn && usage ? (
-          <div className="mt-4 rounded-2xl border bg-white/[0.035] p-3 text-sm leading-6 text-muted-foreground">
-            <p>{usage.dailyRemaining} / {usage.dailyLimit} daily image credits remaining</p>
-            <p>{usage.monthlyRemaining} / {usage.monthlyLimit} monthly image credits remaining</p>
-          </div>
-        ) : null}
-      </div>
-    </div>
-  );
-}
-
-function ConceptGallery({
+function ChatImageStudies({
   concepts,
   activeConceptId,
   favoriteIds,
   comparisonIds,
-  usage,
-  isSignedIn,
-  onImageError,
   finalizedConceptId,
   revisionUnlockedIds,
   isGenerating,
-  onSelect,
-  onEdit,
-  onFinalize,
-  onCreateRevision,
-  onPreview,
-  onFavorite,
-  onCompare
-}: {
-  concepts: GeneratedConcept[];
-  activeConceptId: string;
-  favoriteIds: Set<string>;
-  comparisonIds: string[];
-  usage: UsageState | null;
-  isSignedIn: boolean;
-  onImageError: () => void;
-  finalizedConceptId: string;
-  revisionUnlockedIds: Set<string>;
-  isGenerating: boolean;
-  onSelect: (id: string) => void;
-  onEdit: (concept: GeneratedConcept) => void;
-  onFinalize: (concept: GeneratedConcept) => void;
-  onCreateRevision: (concept: GeneratedConcept) => void;
-  onPreview: (concept: GeneratedConcept) => void;
-  onFavorite: (id: string) => void;
-  onCompare: (id: string) => void;
-}) {
-  const aiDisabled = !isSignedIn || Boolean(usage && (usage.dailyRemaining <= 0 || usage.monthlyRemaining <= 0));
-
-  return (
-    <section className="rounded-3xl border bg-card/70 p-4 shadow-luxury backdrop-blur-xl">
-      <div className="mb-4 flex items-center justify-between gap-3">
-        <div>
-          <p className="text-sm text-muted-foreground">Concept gallery</p>
-          <h3 className="mt-1 font-semibold text-white">Visual Directions</h3>
-        </div>
-        <p className="text-xs text-muted-foreground">{concepts.length ? `${concepts.length} versions` : "No images yet"}</p>
-      </div>
-      {isGenerating ? (
-        <div className="grid gap-4 md:grid-cols-3">
-          <LoadingSkeleton className="aspect-[4/5] rounded-3xl" />
-          <LoadingSkeleton className="aspect-[4/5] rounded-3xl" />
-          <LoadingSkeleton className="aspect-[4/5] rounded-3xl" />
-        </div>
-      ) : concepts.length ? (
-        <motion.div layout className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {concepts.map((concept) => (
-            <GalleryCard
-              key={concept.id}
-              concept={concept}
-              selected={concept.id === activeConceptId}
-              favorite={favoriteIds.has(concept.id)}
-              compared={comparisonIds.includes(concept.id)}
-              finalized={concept.id === finalizedConceptId}
-        revisionUnlocked={revisionUnlockedIds.has(concept.id)}
-        aiDisabled={aiDisabled}
-        onSelect={onSelect}
-              onEdit={onEdit}
-              onFinalize={onFinalize}
-              onCreateRevision={onCreateRevision}
-              onPreview={onPreview}
-              onFavorite={onFavorite}
-              onCompare={onCompare}
-              onImageError={onImageError}
-            />
-          ))}
-        </motion.div>
-      ) : (
-        <ElegantEmptyState
-          title="No visual concepts yet"
-          description="Once the profile is ready, your first classic, modern, and statement concepts will collect here."
-        />
-      )}
-    </section>
-  );
-}
-
-const GalleryCard = memo(function GalleryCard({
-  concept,
-  selected,
-  favorite,
-  compared,
-  finalized,
-  revisionUnlocked,
+  readyForGeneration,
   aiDisabled,
   onSelect,
+  onGenerate,
+  onUpload,
   onEdit,
   onFinalize,
   onCreateRevision,
@@ -1377,14 +1196,18 @@ const GalleryCard = memo(function GalleryCard({
   onCompare,
   onImageError
 }: {
-  concept: GeneratedConcept;
-  selected: boolean;
-  favorite: boolean;
-  compared: boolean;
-  finalized: boolean;
-  revisionUnlocked: boolean;
+  concepts: GeneratedConcept[];
+  activeConceptId: string;
+  favoriteIds: Set<string>;
+  comparisonIds: string[];
+  finalizedConceptId: string;
+  revisionUnlockedIds: Set<string>;
+  isGenerating: boolean;
+  readyForGeneration: boolean;
   aiDisabled: boolean;
   onSelect: (id: string) => void;
+  onGenerate: () => void;
+  onUpload: () => void;
   onEdit: (concept: GeneratedConcept) => void;
   onFinalize: (concept: GeneratedConcept) => void;
   onCreateRevision: (concept: GeneratedConcept) => void;
@@ -1393,84 +1216,112 @@ const GalleryCard = memo(function GalleryCard({
   onCompare: (id: string) => void;
   onImageError: () => void;
 }) {
+  const { t } = useLanguage();
+  if (!concepts.length && !isGenerating && !readyForGeneration) return null;
+
   return (
-    <motion.article
-      layout
-      whileHover={{ y: -4 }}
-      className={cn("group overflow-hidden rounded-3xl border bg-white/[0.035] transition", selected && "border-diamond-champagne/70 shadow-glow")}
-    >
-      <div
-        role="button"
-        tabIndex={0}
-        className="relative block aspect-[4/5] w-full cursor-pointer overflow-hidden bg-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        onClick={() => onSelect(concept.id)}
-        onKeyDown={(event) => {
-          if (event.key === "Enter" || event.key === " ") {
-            event.preventDefault();
-            onSelect(concept.id);
-          }
-        }}
-      >
-        <img src={concept.url} alt={concept.variationName} loading="lazy" onError={onImageError} className="h-full w-full object-cover transition duration-300 group-hover:scale-[1.04]" />
-        <div className="absolute left-3 top-3 rounded-full border bg-black/55 px-3 py-1 text-xs text-white backdrop-blur">
-          V{concept.version}
-        </div>
-        {selected ? (
-          <div className="absolute right-3 top-3 rounded-full border border-diamond-champagne/40 bg-diamond-champagne/20 px-3 py-1 text-xs text-white backdrop-blur">
-            Primary
-          </div>
-        ) : null}
-        {finalized ? (
-          <div className="absolute left-3 top-12 rounded-full border border-diamond-champagne/40 bg-black/65 px-3 py-1 text-xs text-white backdrop-blur">
-            Final Design
-          </div>
-        ) : null}
-        <div className="absolute inset-x-3 bottom-3 flex translate-y-2 gap-2 opacity-0 transition group-hover:translate-y-0 group-hover:opacity-100">
-          <IconButton label="Expand concept" onClick={(event) => { event.stopPropagation(); onPreview(concept); }}>
-            <Expand className="h-4 w-4" />
-          </IconButton>
-          <IconButton label="Favorite concept" active={favorite} onClick={(event) => { event.stopPropagation(); onFavorite(concept.id); }}>
-            <Heart className={cn("h-4 w-4", favorite && "fill-diamond-champagne")} />
-          </IconButton>
-          <IconButton label="Compare concept" active={compared} onClick={(event) => { event.stopPropagation(); onCompare(concept.id); }}>
-            <Columns2 className="h-4 w-4" />
-          </IconButton>
-        </div>
+    <motion.div layout initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="flex gap-4">
+      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-diamond-champagne shadow-[inset_0_0_0_1px_rgba(215,196,154,0.24),0_12px_30px_rgba(0,0,0,0.28)]">
+        <Gem className="h-5 w-5" />
       </div>
-      <div className="space-y-3 p-4">
-        <div>
-          <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">{concept.variationName}</p>
-          <p className="mt-2 line-clamp-2 text-sm leading-6 text-white">{concept.description}</p>
-          {concept.parentId ? <p className="mt-2 text-xs text-muted-foreground">Parent: V{concept.version - 1}</p> : null}
+      <div className="w-full rounded-[1.35rem] bg-black/35 p-5 shadow-[inset_0_0_0_1px_rgba(215,196,154,0.08)]">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="text-[0.68rem] uppercase tracking-[0.22em] text-diamond-champagne/55">{t("Image studies", "دراسات بصرية")}</p>
+            <h3 className="mt-1 font-display text-2xl font-medium text-diamond-pearl">
+              {concepts.length ? t("Presented inside your consultation", "معروضة داخل الاستشارة") : t("Ready for the first visual study", "جاهز لأول دراسة بصرية")}
+            </h3>
+          </div>
+          {!concepts.length ? (
+            <Button disabled={!readyForGeneration || isGenerating || aiDisabled} onClick={onGenerate}>
+              {isGenerating ? <Sparkles className="h-4 w-4 animate-pulse" /> : <Wand2 className="h-4 w-4" />}
+              {t("Present Study", "عرض دراسة")}
+            </Button>
+          ) : null}
         </div>
-        <details className="group/details rounded-2xl border bg-black/20 p-3">
-          <summary className="flex cursor-pointer list-none items-center justify-between text-xs text-muted-foreground">
-            View prompt
-            <ChevronDown className="h-4 w-4 transition group-open/details:rotate-180" />
-          </summary>
-          <p className="mt-3 max-h-28 overflow-y-auto text-xs leading-5 text-muted-foreground">
-            {concept.prompt || "Uploaded reference image. No generation prompt was used."}
-          </p>
-        </details>
-        <div className="grid grid-cols-2 gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={aiDisabled}
-            onClick={() => (finalized && !revisionUnlocked ? onCreateRevision(concept) : onEdit(concept))}
-          >
-            <Wand2 className="h-4 w-4" />
-            {finalized && !revisionUnlocked ? "Revise" : "Edit"}
+
+        {isGenerating ? (
+          <div className="grid gap-3 md:grid-cols-3">
+            <LoadingSkeleton className="aspect-[4/5] rounded-2xl" />
+            <LoadingSkeleton className="aspect-[4/5] rounded-2xl" />
+            <LoadingSkeleton className="aspect-[4/5] rounded-2xl" />
+          </div>
+        ) : concepts.length ? (
+          <div className="grid gap-3 md:grid-cols-2 2xl:grid-cols-3">
+            {concepts.map((concept) => {
+              const finalized = concept.id === finalizedConceptId;
+              const revisionUnlocked = revisionUnlockedIds.has(concept.id);
+              return (
+                <article
+                  key={concept.id}
+                  className={cn(
+                    "group overflow-hidden rounded-[1.2rem] bg-[#090909] shadow-[inset_0_0_0_1px_rgba(215,196,154,0.08)] transition hover:shadow-[inset_0_0_0_1px_rgba(215,196,154,0.22),0_18px_50px_rgba(0,0,0,0.28)]",
+                    concept.id === activeConceptId && "shadow-[inset_0_0_0_1px_rgba(215,196,154,0.34),0_18px_55px_rgba(0,0,0,0.32)]"
+                  )}
+                >
+                  <button
+                    type="button"
+                    className="relative block aspect-[4/5] w-full overflow-hidden text-left focus-visible:outline-none focus-visible:shadow-[inset_0_0_0_3px_rgba(215,196,154,0.18)]"
+                    onClick={() => {
+                      onSelect(concept.id);
+                      onPreview(concept);
+                    }}
+                  >
+                    <img src={concept.url} alt={concept.variationName} loading="lazy" onError={onImageError} className="h-full w-full object-cover transition duration-500 group-hover:scale-[1.03]" />
+                    <div className="absolute left-3 top-3 rounded-full bg-black/60 px-3 py-1 text-xs text-diamond-champagne shadow-[inset_0_0_0_1px_rgba(215,196,154,0.16)] backdrop-blur">
+                      V{concept.version}
+                    </div>
+                    {finalized ? (
+                      <div className="absolute right-3 top-3 rounded-full bg-diamond-champagne/20 px-3 py-1 text-xs text-white shadow-[inset_0_0_0_1px_rgba(215,196,154,0.20)] backdrop-blur">
+                        {t("Final", "نهائي")}
+                      </div>
+                    ) : null}
+                  </button>
+                  <div className="space-y-3 p-3">
+                    <div>
+                      <p className="text-xs uppercase tracking-[0.16em] text-diamond-champagne/65">{concept.variationName}</p>
+                      <p className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground">{concept.description}</p>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <Button variant="secondary" size="sm" onClick={() => (finalized && !revisionUnlocked ? onCreateRevision(concept) : onEdit(concept))} disabled={aiDisabled}>
+                        <Wand2 className="h-4 w-4" />
+                        {finalized && !revisionUnlocked ? t("Revise", "تنقيح") : t("Edit", "تعديل")}
+                      </Button>
+                      <Button variant="outline" size="sm" onClick={() => onFinalize(concept)} disabled={finalized}>
+                        <Check className="h-4 w-4" />
+                        {t("Final", "نهائي")}
+                      </Button>
+                      <IconButton label="Favorite concept" active={favoriteIds.has(concept.id)} onClick={() => onFavorite(concept.id)}>
+                        <Heart className={cn("h-4 w-4", favoriteIds.has(concept.id) && "fill-diamond-champagne")} />
+                      </IconButton>
+                      <IconButton label="Compare concept" active={comparisonIds.includes(concept.id)} onClick={() => onCompare(concept.id)}>
+                        <Columns2 className="h-4 w-4" />
+                      </IconButton>
+                    </div>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="rounded-2xl bg-white/[0.025] p-5 text-sm leading-6 text-muted-foreground shadow-[inset_0_0_0_1px_rgba(215,196,154,0.08)]">
+            {t(
+              "Continue the consultation until the direction is ready, or upload a reference image to begin visually.",
+              "استمر في الاستشارة حتى يصبح الاتجاه واضحاً، أو ارفع صورة مرجعية للبدء بصرياً."
+            )}
+          </div>
+        )}
+
+        {!concepts.length ? (
+          <Button className="mt-3" variant="secondary" onClick={onUpload}>
+            <Upload className="h-4 w-4" />
+            {t("Add Reference Image", "إضافة صورة مرجعية")}
           </Button>
-          <Button variant="secondary" size="sm" onClick={() => onFinalize(concept)} disabled={finalized}>
-            <Check className="h-4 w-4" />
-            Finalize
-          </Button>
-        </div>
+        ) : null}
       </div>
-    </motion.article>
+    </motion.div>
   );
-});
+}
 
 function IconButton({
   label,
@@ -1541,11 +1392,12 @@ function StudioPanel({
   onDownloadPng: () => void;
   onPrint: () => void;
 }) {
+  const { t } = useLanguage();
   const limitReached = Boolean(usage && (usage.dailyRemaining <= 0 || usage.monthlyRemaining <= 0));
   const disabledReason = !isSignedIn
-    ? "Sign in to save your designs and generate AI concepts."
+    ? t("Sign in to save your designs and generate AI concepts.", "سجل الدخول لحفظ التصاميم وإنشاء تصورات بالذكاء الاصطناعي.")
     : limitReached
-      ? "You've reached today's AI image limit. Please try again tomorrow."
+      ? t("You've reached today's AI image limit. Please try again tomorrow.", "لقد وصلت إلى حد الصور اليومي. حاول مرة أخرى غداً.")
       : "";
 
   return (
@@ -1554,10 +1406,10 @@ function StudioPanel({
         <CardHeader>
           <div className="flex items-center justify-between gap-3">
             <div>
-              <p className="text-sm text-muted-foreground">Current status</p>
-              <CardTitle className="mt-1">Design Profile</CardTitle>
+              <p className="text-xs uppercase tracking-[0.24em] text-diamond-champagne/70">{t("Private consultation", "استشارة خاصة")}</p>
+              <CardTitle className="mt-1">{t("Design Profile", "ملف التصميم")}</CardTitle>
             </div>
-            <div className="flex h-14 w-14 items-center justify-center rounded-full border bg-white/[0.04] text-sm font-semibold text-white">
+            <div className="flex h-14 w-14 items-center justify-center rounded-full border border-diamond-champagne/25 bg-black/30 text-sm font-semibold text-diamond-champagne">
               {completion}%
             </div>
           </div>
@@ -1565,21 +1417,21 @@ function StudioPanel({
         <CardContent className="space-y-5">
           <ProgressBar value={completion} />
           <StageTracker stage={stage} ready={profile.readyForGeneration} />
-          {visibleProfile.length ? <ProfileSummary items={visibleProfile} /> : <ElegantEmptyState title="Profile forming" description="The consultant will shape jewelry, stone, setting, style, and occasion details as you talk." compact />}
+          {visibleProfile.length ? <ProfileSummary items={visibleProfile} /> : <ElegantEmptyState title={t("Profile forming", "جاري تكوين الملف")} description={t("The atelier will shape jewelry, stone, setting, style, and occasion details as you talk.", "سيشكل الأتيليه نوع المجوهرات والحجر والترصيع والأسلوب والمناسبة أثناء المحادثة.")} compact />}
           <Button className="w-full" disabled={!profile.readyForGeneration || isGenerating || Boolean(disabledReason)} onClick={onGenerate}>
             {isGenerating ? <Sparkles className="h-4 w-4 animate-pulse" /> : <Wand2 className="h-4 w-4" />}
-            Generate Diamond Concept
+            {t("Present Diamond Study", "عرض دراسة ألماس")}
           </Button>
           {disabledReason ? <p className="mt-3 text-sm leading-6 text-diamond-champagne">{disabledReason}</p> : null}
           {isSignedIn && usage ? (
-            <div className="mt-3 rounded-2xl border bg-white/[0.035] p-3 text-sm leading-6 text-muted-foreground">
+            <div className="mt-3 rounded-2xl bg-black/25 p-3 text-sm leading-6 text-muted-foreground ring-1 ring-diamond-champagne/10">
               <p>{usage.dailyRemaining} / {usage.dailyLimit} daily image credits remaining</p>
               <p>{usage.monthlyRemaining} / {usage.monthlyLimit} monthly image credits remaining</p>
             </div>
           ) : null}
           <Button className="w-full" variant="secondary" onClick={onUpload}>
             <Upload className="h-4 w-4" />
-            Upload Existing Design
+            {t("Add Reference Image", "إضافة صورة مرجعية")}
           </Button>
         </CardContent>
       </Card>
@@ -1588,8 +1440,8 @@ function StudioPanel({
         <CardHeader>
           <div className="flex items-center justify-between gap-3">
             <div>
-              <p className="text-sm text-muted-foreground">Workshop handoff</p>
-              <CardTitle className="mt-1">Design Brief</CardTitle>
+              <p className="text-xs uppercase tracking-[0.24em] text-diamond-champagne/70">{t("Workshop handoff", "تسليم الورشة")}</p>
+              <CardTitle className="mt-1">{t("Atelier Brief", "ملخص الأتيليه")}</CardTitle>
             </div>
             {finalizedConcept ? (
               <motion.div
@@ -1605,22 +1457,22 @@ function StudioPanel({
         <CardContent className="space-y-4">
           {finalizedConcept ? (
             <>
-              <div className="rounded-2xl border border-diamond-champagne/30 bg-diamond-champagne/10 p-4">
-                <p className="font-medium text-white">Design Complete</p>
+              <div className="rounded-2xl bg-diamond-champagne/10 p-4 ring-1 ring-diamond-champagne/20">
+                <p className="font-medium text-white">{t("Final Direction Chosen", "تم اختيار الاتجاه النهائي")}</p>
                 <p className="mt-2 text-sm leading-6 text-muted-foreground">
                   V{finalizedConcept.version} - {finalizedConcept.variationName}
                 </p>
                 <p className="mt-2 text-xs text-diamond-champagne">{referenceId}</p>
               </div>
               {isGeneratingBrief ? (
-                <div className="rounded-2xl border bg-white/[0.035] p-4">
+                <div className="rounded-2xl bg-black/25 p-4 ring-1 ring-diamond-champagne/10">
                   <LoadingSkeleton className="mb-3 h-4 w-2/3" />
-                  <p className="text-sm text-muted-foreground">Preparing workshop handoff...</p>
+                  <p className="text-sm text-muted-foreground">{t("Preparing the atelier handoff...", "جاري تجهيز تسليم الأتيليه...")}</p>
                 </div>
               ) : designBrief ? (
                 <>
-                  <div className="rounded-2xl border bg-white/[0.035] p-4">
-                    <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Session Summary</p>
+                  <div className="rounded-2xl bg-black/25 p-4 ring-1 ring-diamond-champagne/10">
+                    <p className="text-xs uppercase tracking-[0.18em] text-diamond-champagne/70">{t("Session summary", "ملخص الجلسة")}</p>
                     <p className="mt-3 text-sm leading-6 text-white">{designBrief.sessionSummary}</p>
                   </div>
                   <div className="grid grid-cols-2 gap-2">
@@ -1647,18 +1499,18 @@ function StudioPanel({
                   </Button>
                 </>
               ) : (
-                <ElegantEmptyState title="Brief pending" description="The professional handoff brief will appear after GPT completes the session summary." compact />
+                <ElegantEmptyState title={t("Brief pending", "الملخص قيد الانتظار")} description={t("The professional handoff brief will appear after the session summary is prepared.", "سيظهر ملخص التسليم الاحترافي بعد تجهيز ملخص الجلسة.")} compact />
               )}
             </>
           ) : (
-            <ElegantEmptyState title="No final design yet" description="Finalize one concept to generate the workshop-ready design brief and export card." compact />
+            <ElegantEmptyState title={t("No final direction yet", "لا يوجد اتجاه نهائي بعد")} description={t("Choose one study to prepare the workshop-ready design brief and export card.", "اختر دراسة واحدة لتجهيز ملخص التصميم وبطاقة التصدير للورشة.")} compact />
           )}
         </CardContent>
       </Card>
 
       <Card>
         <CardHeader>
-          <CardTitle>Version Timeline</CardTitle>
+          <CardTitle>{t("Design Lineage", "تسلسل التصميم")}</CardTitle>
         </CardHeader>
         <CardContent>
           {concepts.length ? (
@@ -1668,16 +1520,16 @@ function StudioPanel({
                   key={concept.id}
                   type="button"
                   onClick={() => onSelect(concept.id)}
-                  className={cn("flex w-full gap-3 rounded-2xl border p-3 text-left transition hover:bg-white/[0.06] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring", activeConceptId === concept.id && "border-diamond-champagne/70 bg-diamond-champagne/10")}
+                  className={cn("flex w-full gap-3 rounded-2xl p-3 text-left transition hover:bg-white/[0.06] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring", activeConceptId === concept.id && "bg-diamond-champagne/10 ring-1 ring-diamond-champagne/45")}
                 >
                   <div className="flex flex-col items-center">
-                    <div className="flex h-8 w-8 items-center justify-center rounded-full border bg-black/40 text-xs text-white">V{concept.version}</div>
+                    <div className="flex h-8 w-8 items-center justify-center rounded-full bg-black/40 text-xs text-white ring-1 ring-diamond-champagne/15">V{concept.version}</div>
                     {index < concepts.length - 1 ? <div className="mt-2 h-8 w-px bg-border" /> : null}
                   </div>
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-medium text-white">{concept.variationName}</p>
                     <p className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground">
-                      {concept.parentId ? "Refined version" : "Original concept"}
+                      {concept.parentId ? t("Refined study", "دراسة منقحة") : t("Original study", "دراسة أصلية")}
                     </p>
                     {activeConceptId === concept.id ? <p className="mt-2 text-xs text-diamond-champagne">Current</p> : null}
                   </div>
@@ -1685,7 +1537,7 @@ function StudioPanel({
               ))}
             </div>
           ) : (
-            <ElegantEmptyState title="No history yet" description="Your generated and refined versions will form a clickable timeline here." compact />
+            <ElegantEmptyState title={t("No lineage yet", "لا يوجد تسلسل بعد")} description={t("Your generated and refined studies will form a clickable timeline here.", "ستظهر الدراسات المنشأة والمنقحة هنا كتسلسل قابل للنقر.")} compact />
           )}
         </CardContent>
       </Card>
@@ -1702,7 +1554,14 @@ function ProgressBar({ value }: { value: number }) {
 }
 
 function StageTracker({ stage, ready }: { stage: ConversationStage; ready: boolean }) {
-  const steps = ["Discovery", "Refinement", "Ready for Generation", "Refining", "Completed"];
+  const { t } = useLanguage();
+  const steps = [
+    t("Discovery", "الاستكشاف"),
+    t("Refinement", "التنقيح"),
+    t("Ready for Generation", "جاهز للإنشاء"),
+    t("Refining", "قيد التعديل"),
+    t("Completed", "مكتمل")
+  ];
   const activeIndex = ready ? 2 : stage === "refinement" ? 1 : 0;
 
   return (
@@ -1730,8 +1589,8 @@ function ProfileSummary({
         const sectionItems = items.filter((item) => item.section === section);
         if (!sectionItems.length) return null;
         return (
-          <div key={section} className="rounded-2xl border bg-white/[0.035] p-4">
-            <p className="mb-3 text-xs uppercase tracking-[0.18em] text-muted-foreground">{section}</p>
+          <div key={section} className="rounded-2xl bg-black/22 p-4 ring-1 ring-diamond-champagne/10">
+            <p className="mb-3 text-xs uppercase tracking-[0.18em] text-diamond-champagne/70">{section}</p>
             <div className="space-y-3">
               {sectionItems.map((item) => (
                 <div key={item.key} className="text-sm">
@@ -1749,11 +1608,11 @@ function ProfileSummary({
 
 function ElegantEmptyState({ title, description, compact }: { title: string; description: string; compact?: boolean }) {
   return (
-    <div className={cn("rounded-3xl border bg-white/[0.025] p-6 text-center", compact && "p-4")}>
-      <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full border bg-white/[0.04] text-diamond-champagne">
+    <div className={cn("rounded-2xl bg-black/20 p-6 text-center ring-1 ring-diamond-champagne/10", compact && "p-4")}>
+      <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full border border-diamond-champagne/25 bg-black/35 text-diamond-champagne">
         <Gem className="h-5 w-5" />
       </div>
-      <h3 className="font-semibold text-white">{title}</h3>
+      <h3 className="font-display text-xl font-medium text-white">{title}</h3>
       <p className="mt-2 text-sm leading-6 text-muted-foreground">{description}</p>
     </div>
   );
@@ -1797,9 +1656,9 @@ function UploadReferenceDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-3xl">
         <DialogHeader>
-          <DialogTitle>Upload Existing Design</DialogTitle>
+          <DialogTitle>Add a Reference Image</DialogTitle>
           <DialogDescription>
-            Add a diamond reference image as Version 1, then refine it with the same AI editing workflow.
+            Add a diamond reference image as the first study, then refine it with the same private atelier workflow.
           </DialogDescription>
         </DialogHeader>
 
@@ -1812,7 +1671,7 @@ function UploadReferenceDialog({
             onDragLeave={() => setIsDragging(false)}
             onDrop={handleDrop}
             className={cn(
-              "flex min-h-72 cursor-pointer flex-col items-center justify-center rounded-3xl border border-dashed bg-white/[0.025] p-8 text-center transition focus-within:ring-2 focus-within:ring-ring",
+              "flex min-h-72 cursor-pointer flex-col items-center justify-center rounded-2xl border border-dashed border-diamond-champagne/20 bg-black/25 p-8 text-center transition focus-within:ring-2 focus-within:ring-ring",
               isDragging && "border-diamond-champagne bg-diamond-champagne/10"
             )}
           >
@@ -1825,17 +1684,17 @@ function UploadReferenceDialog({
             <div className="mb-5 flex h-16 w-16 items-center justify-center rounded-full border bg-white/[0.05] text-diamond-champagne">
               <Upload className="h-7 w-7" />
             </div>
-            <h3 className="text-lg font-semibold text-white">Drop your reference image here</h3>
+            <h3 className="font-display text-2xl font-medium text-white">Drop your reference image here</h3>
             <p className="mt-2 max-w-sm text-sm leading-6 text-muted-foreground">
               PNG, JPG, JPEG, or WEBP. Maximum 10MB. PDF, SVG, HEIC, and videos are not accepted.
             </p>
             <Button className="mt-5" type="button" variant="secondary">
-              Browse Files
+              Browse files
             </Button>
           </label>
 
           <div className="space-y-4">
-            <div className="overflow-hidden rounded-3xl border bg-black/40">
+            <div className="overflow-hidden rounded-2xl border border-diamond-champagne/15 bg-black/40">
               {pendingUpload ? (
                 <img
                   src={pendingUpload.url}
@@ -1846,7 +1705,7 @@ function UploadReferenceDialog({
               ) : (
                 <div className="flex aspect-square flex-col items-center justify-center p-6 text-center">
                   <Gem className="mb-4 h-8 w-8 text-diamond-champagne" />
-                  <p className="text-sm text-muted-foreground">Preview appears before confirming.</p>
+                  <p className="text-sm text-muted-foreground">A private preview appears before confirming.</p>
                 </div>
               )}
             </div>
@@ -1861,7 +1720,7 @@ function UploadReferenceDialog({
             {isProcessing ? (
               <div className="rounded-2xl border bg-white/[0.035] p-4">
                 <LoadingSkeleton className="mb-3 h-4 w-2/3" />
-                <p className="text-sm text-muted-foreground">Preparing your reference design...</p>
+                <p className="text-sm text-muted-foreground">Preparing your reference for the atelier...</p>
               </div>
             ) : null}
 
@@ -1876,7 +1735,7 @@ function UploadReferenceDialog({
                 Cancel
               </Button>
               <Button onClick={onConfirm} disabled={!pendingUpload || isProcessing}>
-                Confirm Upload
+                Add Reference
               </Button>
             </div>
           </div>
@@ -1901,14 +1760,14 @@ function FinalizeDesignDialog({
     <Dialog open={Boolean(concept)} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-lg">
         <DialogHeader>
-          <DialogTitle>Finalize This Design</DialogTitle>
+          <DialogTitle>Choose This Final Direction</DialogTitle>
           <DialogDescription>
-            You are about to finalize this concept as your preferred diamond design.
+            You are about to mark this study as the preferred diamond direction.
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-4">
           {concept ? (
-            <div className="overflow-hidden rounded-3xl border bg-white/[0.035]">
+            <div className="overflow-hidden rounded-2xl border border-diamond-champagne/15 bg-black/30">
               <img src={concept.url} alt={concept.variationName} onError={onImageError} className="aspect-[4/3] w-full object-cover" />
               <div className="p-4">
                 <p className="text-sm font-medium text-white">
@@ -1928,7 +1787,7 @@ function FinalizeDesignDialog({
             </Button>
             <Button onClick={onConfirm}>
               <Check className="h-4 w-4" />
-              Finalize
+              Choose Direction
             </Button>
           </div>
         </div>
@@ -1969,12 +1828,12 @@ function EditConceptDialog({
     <Dialog open={Boolean(concept)} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-3xl">
         <DialogHeader>
-          <DialogTitle>Refine Diamond Concept</DialogTitle>
-          <DialogDescription>Describe one focused refinement. The original version will remain in your design history.</DialogDescription>
+          <DialogTitle>Refine Diamond Study</DialogTitle>
+          <DialogDescription>Describe one focused refinement. The original study will remain in your design history.</DialogDescription>
         </DialogHeader>
         {concept ? (
           <div className="grid gap-5 md:grid-cols-[18rem_1fr]">
-            <div className="overflow-hidden rounded-3xl border bg-black">
+            <div className="overflow-hidden rounded-2xl border border-diamond-champagne/15 bg-black">
               <img src={concept.url} alt={concept.variationName} onError={onImageError} className="aspect-square h-full w-full object-cover" />
             </div>
             <div className="space-y-4">
@@ -1997,13 +1856,13 @@ function EditConceptDialog({
                 disabled={isEditing}
                 rows={5}
                 className="w-full resize-none rounded-2xl border bg-background/70 p-4 text-sm leading-6 text-white outline-none placeholder:text-muted-foreground disabled:opacity-60"
-                placeholder="Describe the change you want..."
+                placeholder="Describe the refinement you want..."
                 aria-label="Describe the design refinement"
               />
               {isEditing ? (
                 <div className="rounded-2xl border bg-white/[0.035] p-4">
                   <LoadingSkeleton className="mb-3 h-4 w-2/3" />
-                  <p className="text-sm text-muted-foreground">Refining your diamond concept...</p>
+                  <p className="text-sm text-muted-foreground">Refining your diamond study...</p>
                 </div>
               ) : null}
               {disabledReason ? <p className="text-sm leading-6 text-diamond-champagne">{disabledReason}</p> : null}
@@ -2015,7 +1874,7 @@ function EditConceptDialog({
               ) : null}
               <Button className="w-full" disabled={isEditing || !instruction.trim() || Boolean(disabledReason)} onClick={onSubmit}>
                 {isEditing ? <Sparkles className="h-4 w-4 animate-pulse" /> : <Wand2 className="h-4 w-4" />}
-                Submit Refinement
+                Refine Study
               </Button>
             </div>
           </div>
@@ -2050,8 +1909,8 @@ function PreviewDialog({
             <div className="relative flex min-h-[80vh] flex-col">
               <div className="flex items-center justify-between gap-3 border-b bg-black/35 p-4 backdrop-blur-xl">
                 <div>
-                  <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Fullscreen preview</p>
-                  <h2 className="mt-1 text-lg font-semibold text-white">
+                  <p className="text-xs uppercase tracking-[0.18em] text-diamond-champagne/70">Private preview</p>
+                  <h2 className="font-display mt-1 text-2xl font-medium text-white">
                     V{concept.version} - {concept.variationName}
                   </h2>
                 </div>
@@ -2071,7 +1930,7 @@ function PreviewDialog({
                     <ChevronLeft className="h-5 w-5" />
                   </Button>
                 ) : null}
-                <img src={concept.url} alt={concept.variationName} onError={onImageError} className="max-h-[68vh] rounded-[2rem] border object-contain shadow-luxury" />
+                <img src={concept.url} alt={concept.variationName} onError={onImageError} className="max-h-[68vh] rounded-2xl border border-diamond-champagne/15 object-contain shadow-luxury" />
                 {canNavigate ? (
                   <Button
                     size="icon"
@@ -2107,16 +1966,16 @@ function ComparisonDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-6xl">
         <DialogHeader>
-          <DialogTitle>Compare Concepts</DialogTitle>
-          <DialogDescription>Select two images from the gallery to review them side by side.</DialogDescription>
+          <DialogTitle>Compare Design Studies</DialogTitle>
+          <DialogDescription>Select two images from the archive to review them side by side.</DialogDescription>
         </DialogHeader>
         {concepts.length === 2 ? (
           <div className="grid gap-5 md:grid-cols-2">
             {concepts.map((concept, index) => (
-              <div key={concept.id} className="overflow-hidden rounded-3xl border bg-white/[0.035]">
+              <div key={concept.id} className="overflow-hidden rounded-2xl border border-diamond-champagne/15 bg-black/30">
                 <div className="border-b p-4">
                   <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">{index === 0 ? "Before" : "After"}</p>
-                  <h3 className="mt-1 font-semibold text-white">
+                  <h3 className="font-display mt-1 text-xl font-medium text-white">
                     V{concept.version} - {concept.variationName}
                   </h3>
                 </div>
@@ -2126,7 +1985,7 @@ function ComparisonDialog({
             ))}
           </div>
         ) : (
-          <ElegantEmptyState title="Choose two concepts" description="Use the compare icon on two gallery cards to open a split-screen review." />
+          <ElegantEmptyState title="Choose two studies" description="Use the compare icon on two gallery cards to open a split-screen review." />
         )}
       </DialogContent>
     </Dialog>
@@ -2176,4 +2035,19 @@ function cleanClientSuggestions(actions: unknown): string[] {
     .slice(0, 4);
 
   return cleaned.length ? cleaned : initialSuggestions;
+}
+
+function translateSuggestion(value: string, t: (english: string, arabic: string) => string) {
+  const suggestions: Record<string, string> = {
+    "Engagement ring": "خاتم خطوبة",
+    "Modern pendant": "قلادة عصرية",
+    "I prefer white gold": "أفضل الذهب الأبيض",
+    "I want an oval diamond": "أريد ألماسة بيضاوية",
+    "Classic solitaire engagement ring": "خاتم خطوبة سوليتير كلاسيكي",
+    "Vintage inspired halo pendant": "قلادة هالة بطابع كلاسيكي",
+    "Elegant three stone ring": "خاتم أنيق بثلاثة أحجار",
+    "Nature inspired design": "تصميم مستوحى من الطبيعة"
+  };
+
+  return t(value, suggestions[value] ?? value);
 }

@@ -3,6 +3,7 @@ export const serverEnv = {
   openaiModel: process.env.OPENAI_MODEL?.trim() || "gpt-5.4",
   replicateApiToken: process.env.REPLICATE_API_TOKEN?.trim() ?? "",
   demoMode: process.env.NEXT_PUBLIC_DEMO_MODE === "true",
+  siteUrl: process.env.NEXT_PUBLIC_SITE_URL?.trim() ?? "",
   supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() ?? "",
   supabaseAnonKey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim() ?? "",
   supabaseServiceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY?.trim() ?? ""
@@ -25,6 +26,7 @@ const requiredProductionEnv = [
   "OPENAI_API_KEY",
   "OPENAI_MODEL",
   "REPLICATE_API_TOKEN",
+  "NEXT_PUBLIC_SITE_URL",
   "NEXT_PUBLIC_SUPABASE_URL",
   "NEXT_PUBLIC_SUPABASE_ANON_KEY",
   "SUPABASE_SERVICE_ROLE_KEY"

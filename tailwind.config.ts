@@ -49,22 +49,25 @@ const config: Config = {
         },
         diamond: {
           frost: "#f7fbff",
-          silver: "#c9d3df",
-          graphite: "#101114",
-          ink: "#050506",
-          champagne: "#d7c49a"
+          silver: "#d8d0c4",
+          graphite: "#121212",
+          ink: "#0b0b0b",
+          champagne: "#d7c49a",
+          pearl: "#eee8dc",
+          smoke: "#9b9284"
         }
       },
       fontFamily: {
-        sans: ["var(--font-geist-sans)", "Inter", "system-ui", "sans-serif"]
+        sans: ["Inter", "system-ui", "sans-serif"],
+        display: ["Cormorant Garamond", "Playfair Display", "Georgia", "serif"]
       },
       boxShadow: {
-        glow: "0 0 60px rgba(201, 211, 223, 0.18)",
-        luxury: "0 24px 80px rgba(0, 0, 0, 0.45)"
+        glow: "0 0 45px rgba(215, 196, 154, 0.12)",
+        luxury: "0 30px 90px rgba(0, 0, 0, 0.5)"
       },
       backgroundImage: {
         "diamond-radial":
-          "radial-gradient(circle at top, rgba(247,251,255,0.16), transparent 34%), linear-gradient(135deg, rgba(255,255,255,0.06), transparent 35%)"
+          "radial-gradient(circle at 50% 0%, rgba(215,196,154,0.14), transparent 28rem), linear-gradient(180deg, #0b0b0b 0%, #10100f 48%, #0b0b0b 100%)"
       },
       keyframes: {
         shimmer: {

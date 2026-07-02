@@ -1,16 +1,19 @@
 "use client";
 
 import Link from "next/link";
-import { Gem, Menu, Search } from "lucide-react";
+import { Gem, Menu, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { navigationItems } from "@/config/navigation";
 import { AuthButton } from "@/components/auth/auth-button";
+import { useLanguage } from "@/lib/language";
 
 export function Header() {
+  const { isArabic, toggleLanguage, t } = useLanguage();
+
   return (
-    <header className="sticky top-0 z-30 border-b bg-background/70 backdrop-blur-xl">
-      <div className="container flex h-20 items-center justify-between gap-4">
+    <header className="sticky top-0 z-30 bg-[#050505]/82 backdrop-blur-xl">
+      <div className="mx-auto flex h-20 w-full max-w-[1500px] items-center justify-between gap-4 px-4 md:px-7">
         <div className="flex items-center gap-3 lg:hidden">
           <Dialog>
             <DialogTrigger asChild>
@@ -20,17 +23,17 @@ export function Header() {
             </DialogTrigger>
             <DialogContent className="top-6 translate-y-0 sm:max-w-sm">
               <DialogHeader>
-                <DialogTitle>Navigation</DialogTitle>
+                <DialogTitle>{t("Navigation", "التنقل")}</DialogTitle>
               </DialogHeader>
               <nav className="grid gap-2 pt-2">
                 {navigationItems.map((item) => (
                   <Link
                     key={item.title}
                     href={item.href}
-                    className="flex items-center gap-3 rounded-2xl border bg-white/[0.035] px-4 py-3 text-sm text-muted-foreground transition hover:bg-white/[0.07] hover:text-white"
+                    className="flex items-center gap-3 rounded-2xl bg-white/[0.035] px-4 py-3 text-sm text-muted-foreground shadow-[inset_0_0_0_1px_rgba(215,196,154,0.08)] transition hover:bg-white/[0.07] hover:text-white"
                   >
                     <item.icon className="h-4 w-4" />
-                    {item.title}
+                    {isArabic ? item.titleAr : item.title}
                   </Link>
                 ))}
               </nav>
@@ -38,19 +41,22 @@ export function Header() {
           </Dialog>
           <Link href="/" className="flex items-center gap-2 font-semibold text-white">
             <Gem className="h-5 w-5 text-diamond-champagne" />
-            Diamond AI
+            <span className="font-display text-xl font-medium">Maison DIA</span>
           </Link>
         </div>
-        <div className="hidden min-w-0 flex-1 items-center rounded-full border bg-white/[0.035] px-4 py-3 text-muted-foreground md:flex lg:max-w-md">
-          <Search className="mr-3 h-4 w-4" />
-          <span className="truncate text-sm">Search designs, versions, and settings</span>
+        <div className="hidden min-w-0 flex-1 items-center rounded-full bg-white/[0.035] px-5 py-3 text-muted-foreground shadow-[inset_0_0_0_1px_rgba(215,196,154,0.08)] md:flex lg:max-w-md">
+          <Sparkles className="h-4 w-4 text-diamond-champagne/70 ltr:mr-3 rtl:ml-3" />
+          <span className="truncate text-sm">{t("Private diamond design studio", "استوديو خاص لتصميم المجوهرات")}</span>
         </div>
         <div className="ml-auto flex items-center gap-3">
+          <Button variant="ghost" size="sm" onClick={toggleLanguage} aria-label={t("Switch to Arabic", "التبديل إلى الإنجليزية")}>
+            {isArabic ? "EN" : "عربي"}
+          </Button>
           <Button asChild variant="secondary">
-            <Link href="/gallery">View Gallery</Link>
+            <Link href="/gallery">{t("View Gallery", "عرض التصاميم")}</Link>
           </Button>
           <Button asChild>
-            <Link href="/chat">New Design</Link>
+            <Link href="/chat">{t("New Design", "تصميم جديد")}</Link>
           </Button>
           <AuthButton />
         </div>

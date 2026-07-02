@@ -4,14 +4,14 @@ import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "@/lib/utils";
 
 const buttonVariants = cva(
-  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-full text-sm font-medium transition duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50",
+  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-full text-sm font-medium tracking-[0.01em] transition duration-300 focus-visible:outline-none focus-visible:shadow-[0_0_0_3px_rgba(215,196,154,0.18)] disabled:pointer-events-none disabled:opacity-50",
   {
     variants: {
       variant: {
-        default: "bg-primary text-primary-foreground shadow-glow hover:bg-primary/90",
-        secondary: "border border-white/10 bg-white/[0.06] text-foreground hover:bg-white/[0.1]",
-        ghost: "text-muted-foreground hover:bg-white/[0.07] hover:text-foreground",
-        outline: "border border-border bg-transparent text-foreground hover:bg-white/[0.06]"
+        default: "border border-diamond-champagne/70 bg-diamond-champagne text-black shadow-[0_10px_26px_rgba(215,196,154,0.13)] hover:bg-diamond-pearl",
+        secondary: "border border-diamond-champagne/15 bg-[#11100f] text-diamond-pearl shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] hover:border-diamond-champagne/35 hover:bg-[#171512]",
+        ghost: "text-muted-foreground hover:bg-diamond-champagne/[0.07] hover:text-diamond-pearl",
+        outline: "border border-diamond-champagne/20 bg-transparent text-diamond-pearl hover:border-diamond-champagne/45 hover:bg-diamond-champagne/[0.055]"
       },
       size: {
         default: "h-10 px-5",
