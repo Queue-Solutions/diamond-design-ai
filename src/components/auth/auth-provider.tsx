@@ -11,6 +11,7 @@ type AuthContextValue = {
   user: User | null;
   isConfigured: boolean;
   isLoading: boolean;
+  signInWithGoogle: () => Promise<void>;
   signInWithEmail: (email: string) => Promise<void>;
   signOut: () => Promise<void>;
   getAccessToken: () => Promise<string>;
@@ -60,6 +61,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (error) throw error;
   }
 
+  async function signInWithGoogle() {
+    if (!supabase) throw new Error("Supabase is not configured.");
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: {
+        redirectTo: `${getPublicSiteUrl()}/auth/callback?next=/chat`
+      }
+    });
+    if (error) throw error;
+  }
+
   async function signOut() {
     if (!supabase) return;
     await supabase.auth.signOut();
@@ -79,6 +91,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         user: session?.user ?? null,
         isConfigured: Boolean(supabase),
         isLoading,
+        signInWithGoogle,
         signInWithEmail,
         signOut,
         getAccessToken

@@ -115,6 +115,25 @@ Supabase Auth URL configuration:
 
 Set `NEXT_PUBLIC_SITE_URL=https://diamond-design-ai.vercel.app` in Vercel so magic link emails use the production URL instead of localhost.
 
+Google sign-in setup:
+
+In Supabase Dashboard -> Authentication -> Providers -> Google:
+
+- Enable Google provider
+- Add Google OAuth Client ID
+- Add Google OAuth Client Secret
+
+In Google Cloud Console, add this authorized redirect URI:
+
+- `https://YOUR_SUPABASE_PROJECT_REF.supabase.co/auth/v1/callback`
+
+Supabase URL Configuration:
+
+- Site URL: `https://diamond-design-ai.vercel.app`
+- Redirect URLs:
+  - `https://diamond-design-ai.vercel.app/**`
+  - `http://localhost:3000/**`
+
 The migration creates:
 
 - `profiles`
