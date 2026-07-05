@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
-import { Shield, Users, Wand2 } from "lucide-react";
+import { Search, Shield, Users, Wand2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { LoadingSkeleton } from "@/components/shared/loading-skeleton";
@@ -27,7 +27,7 @@ type AdminMetrics = {
     id: string;
     email: string | null;
     full_name: string | null;
-    role: string;
+    role: "customer" | "admin";
     daily_image_limit: number;
     monthly_image_limit: number;
     is_blocked: boolean;
@@ -39,6 +39,7 @@ export default function AdminPage() {
   const [metrics, setMetrics] = useState<AdminMetrics | null>(null);
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(true);
+  const [userSearch, setUserSearch] = useState("");
 
   useEffect(() => {
     void loadMetrics();
@@ -65,7 +66,7 @@ export default function AdminPage() {
     }
   }
 
-  async function updateUser(userId: string, updates: { isBlocked?: boolean; dailyImageLimit?: number; monthlyImageLimit?: number }) {
+  async function updateUser(userId: string, updates: { isBlocked?: boolean; dailyImageLimit?: number; monthlyImageLimit?: number; role?: "customer" | "admin" }) {
     setError("");
     try {
       const response = await fetch("/api/admin", {
@@ -80,6 +81,14 @@ export default function AdminPage() {
       setError(updateError instanceof Error ? updateError.message : "The user could not be updated.");
     }
   }
+
+  const filteredUsers = metrics
+    ? metrics.users.filter((profile) => {
+        const query = userSearch.trim().toLowerCase();
+        if (!query) return true;
+        return [profile.email, profile.full_name].some((value) => value?.toLowerCase().includes(query));
+      })
+    : [];
 
   return (
     <div className="min-h-[calc(100vh-5rem)] space-y-5">
@@ -120,12 +129,32 @@ export default function AdminPage() {
           <section className="grid gap-5 xl:grid-cols-[1fr_26rem]">
             <Card>
               <CardHeader>
-                <CardTitle>User Limits</CardTitle>
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <CardTitle>Users</CardTitle>
+                  <label className="flex min-w-0 items-center gap-2 rounded-full border bg-background/70 px-3 py-2 text-sm text-muted-foreground sm:w-72">
+                    <Search className="h-4 w-4 shrink-0" />
+                    <input
+                      value={userSearch}
+                      onChange={(event) => setUserSearch(event.target.value)}
+                      placeholder="Search by email or name"
+                      className="min-w-0 flex-1 bg-transparent text-white outline-none placeholder:text-muted-foreground"
+                    />
+                  </label>
+                </div>
               </CardHeader>
               <CardContent className="space-y-3">
-                {metrics.users.map((profile) => (
-                  <UserLimitRow key={profile.id} profile={profile} onUpdate={updateUser} />
-                ))}
+                {filteredUsers.length ? (
+                  filteredUsers.map((profile) => (
+                    <UserLimitRow
+                      key={profile.id}
+                      profile={profile}
+                      currentUserId={user?.id ?? ""}
+                      onUpdate={updateUser}
+                    />
+                  ))
+                ) : (
+                  <p className="text-sm text-muted-foreground">No users match that search.</p>
+                )}
               </CardContent>
             </Card>
 
@@ -169,19 +198,26 @@ function MetricCard({ icon, label, value }: { icon: ReactNode; label: string; va
 
 function UserLimitRow({
   profile,
+  currentUserId,
   onUpdate
 }: {
   profile: AdminMetrics["users"][number];
-  onUpdate: (userId: string, updates: { isBlocked?: boolean; dailyImageLimit?: number; monthlyImageLimit?: number }) => Promise<void>;
+  currentUserId: string;
+  onUpdate: (userId: string, updates: { isBlocked?: boolean; dailyImageLimit?: number; monthlyImageLimit?: number; role?: "customer" | "admin" }) => Promise<void>;
 }) {
   const [daily, setDaily] = useState(String(profile.daily_image_limit));
   const [monthly, setMonthly] = useState(String(profile.monthly_image_limit));
+  const isCurrentUser = profile.id === currentUserId;
 
   return (
-    <div className="grid gap-3 rounded-2xl border bg-white/[0.035] p-4 lg:grid-cols-[minmax(0,1fr)_8rem_8rem_auto_auto] lg:items-center">
+    <div className="grid gap-3 rounded-2xl border bg-white/[0.035] p-4 lg:grid-cols-[minmax(0,1fr)_8rem_8rem_auto_auto_auto] lg:items-center">
       <div className="min-w-0">
         <p className="truncate text-sm font-medium text-white">{profile.email ?? profile.id}</p>
-        <p className="mt-1 text-xs text-muted-foreground">{profile.role}</p>
+        <p className="mt-1 truncate text-xs text-muted-foreground">
+          {profile.full_name ? `${profile.full_name} • ` : ""}
+          {profile.role}
+          {isCurrentUser ? " • you" : ""}
+        </p>
       </div>
       <input
         value={daily}
@@ -213,6 +249,21 @@ function UserLimitRow({
       >
         {profile.is_blocked ? "Unblock" : "Block"}
       </Button>
+      {profile.role === "admin" ? (
+        <Button
+          variant="secondary"
+          className="border-destructive/40 text-destructive-foreground"
+          disabled={isCurrentUser}
+          title={isCurrentUser ? "You cannot remove your own admin access." : undefined}
+          onClick={() => onUpdate(profile.id, { role: "customer" })}
+        >
+          Remove Admin
+        </Button>
+      ) : (
+        <Button variant="secondary" onClick={() => onUpdate(profile.id, { role: "admin" })}>
+          Promote to Admin
+        </Button>
+      )}
     </div>
   );
 }

@@ -10,6 +10,7 @@ type AdminPatchBody = {
   isBlocked?: boolean;
   dailyImageLimit?: number;
   monthlyImageLimit?: number;
+  role?: "customer" | "admin";
 };
 
 export async function GET(request: Request) {
@@ -105,14 +106,51 @@ export async function PATCH(request: Request) {
       throw new ApiInputError("User ID is required.");
     }
 
-    const updates: Record<string, number | boolean> = {};
+    const updates: Record<string, number | boolean | string> = {};
     if (typeof body.isBlocked === "boolean") updates.is_blocked = body.isBlocked;
     if (Number.isInteger(body.dailyImageLimit) && body.dailyImageLimit! >= 0) updates.daily_image_limit = body.dailyImageLimit!;
     if (Number.isInteger(body.monthlyImageLimit) && body.monthlyImageLimit! >= 0) updates.monthly_image_limit = body.monthlyImageLimit!;
+    if (body.role !== undefined) {
+      if (body.role !== "admin" && body.role !== "customer") {
+        throw new ApiInputError("Role must be admin or customer.");
+      }
+      updates.role = body.role;
+    }
+
+    if (!Object.keys(updates).length) {
+      throw new ApiInputError("At least one user update is required.");
+    }
 
     const admin = createAdminSupabaseClient();
     if (!admin) {
       return NextResponse.json({ error: "Supabase admin client is not configured." }, { status: 503 });
+    }
+
+    const { data: targetProfile, error: targetProfileError } = await admin
+      .from("profiles")
+      .select("id,role")
+      .eq("id", body.userId)
+      .maybeSingle<{ id: string; role: "customer" | "admin" }>();
+
+    if (targetProfileError) throw targetProfileError;
+    if (!targetProfile) {
+      throw new ApiInputError("User profile was not found.");
+    }
+
+    if (updates.role === "customer" && targetProfile.role === "admin") {
+      if (body.userId === auth.user.id) {
+        throw new ApiInputError("You cannot remove your own admin access.");
+      }
+
+      const { count, error: adminCountError } = await admin
+        .from("profiles")
+        .select("id", { count: "exact", head: true })
+        .eq("role", "admin");
+
+      if (adminCountError) throw adminCountError;
+      if ((count ?? 0) <= 1) {
+        throw new ApiInputError("At least one admin must remain.");
+      }
     }
 
     const { error } = await admin.from("profiles").update(updates).eq("id", body.userId);
