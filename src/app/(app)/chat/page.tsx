@@ -54,7 +54,7 @@ import {
 const initialAssistantMessage: ChatMessage = {
   id: "welcome",
   role: "assistant",
-  createdAt: new Date().toISOString(),
+  createdAt: "2026-01-01T00:00:00.000Z",
   content:
     "Welcome to your private diamond atelier. Tell me the piece you imagine, or begin with the occasion, metal, and diamond shape."
 };
@@ -676,13 +676,13 @@ export default function ChatPage() {
   }
 
   return (
-    <div className="relative min-h-[calc(100vh-5rem)]">
+    <div className="relative min-h-[calc(100vh-5rem)] overflow-x-hidden">
       <div className="pointer-events-none absolute inset-x-0 top-0 h-[34rem] rounded-[3rem] bg-[radial-gradient(circle_at_45%_0%,rgba(215,196,154,0.16),transparent_34rem)]" />
 
       {error ? <LuxuryAlert message={error} onRetry={() => setError("")} /> : null}
 
-      <div className="relative grid gap-6 xl:grid-cols-[minmax(0,1fr)_23rem]">
-        <div className="space-y-6">
+      <div className="relative grid min-w-0 gap-6 xl:grid-cols-[minmax(0,1fr)_23rem]">
+        <div className="min-w-0 space-y-6">
           <ConversationPanel
             messages={messages}
             input={input}
@@ -935,12 +935,12 @@ function ConversationPanel({
     <motion.section
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
-      className="relative overflow-hidden rounded-[2rem] bg-[#0c0c0b] shadow-[inset_0_1px_0_rgba(215,196,154,0.14),0_30px_110px_rgba(0,0,0,0.48)]"
+      className="relative min-w-0 overflow-hidden rounded-[2rem] bg-[#0c0c0b] shadow-[inset_0_1px_0_rgba(215,196,154,0.14),0_30px_110px_rgba(0,0,0,0.48)]"
     >
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_18%_0%,rgba(215,196,154,0.11),transparent_25rem)]" />
       <div className="absolute inset-x-10 top-0 h-px bg-gradient-to-r from-transparent via-diamond-champagne/35 to-transparent" />
 
-      <div className="relative grid gap-7 p-6 md:p-8 xl:grid-cols-[16rem_minmax(0,1fr)]">
+      <div className="relative grid min-w-0 gap-7 p-4 sm:p-6 md:p-8 xl:grid-cols-[16rem_minmax(0,1fr)]">
         <div className="flex flex-col justify-between gap-8 border-b border-diamond-champagne/10 pb-6 xl:border-b-0 xl:border-r xl:pb-0 xl:pr-7">
           <div>
             <div className="mb-6 inline-flex items-center gap-2 rounded-full bg-white/[0.035] px-4 py-2 text-xs uppercase tracking-[0.24em] text-diamond-champagne/75 shadow-[inset_0_0_0_1px_rgba(215,196,154,0.10)]">
@@ -998,7 +998,7 @@ function ConversationPanel({
           </div>
         </div>
 
-        <div className="flex min-h-[42rem] flex-col">
+        <div className="flex min-h-[42rem] min-w-0 flex-col">
           <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
             <div>
               <p className="text-xs uppercase tracking-[0.26em] text-diamond-champagne/70">{t("Master designer", "المصمم الرئيسي")}</p>
@@ -1007,7 +1007,7 @@ function ConversationPanel({
             <Gem className="h-5 w-5 text-diamond-champagne/75" />
           </div>
 
-          <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto rounded-[1.4rem] bg-[#070707]/62 p-5 shadow-[inset_0_0_0_1px_rgba(215,196,154,0.07),inset_0_1px_20px_rgba(255,255,255,0.015)]">
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-5 overflow-y-auto rounded-[1.4rem] bg-[#070707]/62 p-3 shadow-[inset_0_0_0_1px_rgba(215,196,154,0.07),inset_0_1px_20px_rgba(255,255,255,0.015)] sm:p-5">
             <AnimatePresence initial={false}>
               {messages.map((message) => (
                 <ChatBubble key={message.id} message={message} stream={message.id === lastAssistantId} />
@@ -1093,7 +1093,7 @@ const ChatBubble = memo(function ChatBubble({ message, stream }: { message: Chat
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -8 }}
-      className={cn("flex gap-4", isAssistant ? "justify-start" : "justify-end")}
+      className={cn("flex min-w-0 gap-3 sm:gap-4", isAssistant ? "justify-start" : "justify-end")}
     >
       {isAssistant ? (
         <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-diamond-champagne shadow-[inset_0_0_0_1px_rgba(215,196,154,0.24),0_12px_30px_rgba(0,0,0,0.28)]">
@@ -1102,11 +1102,13 @@ const ChatBubble = memo(function ChatBubble({ message, stream }: { message: Chat
       ) : null}
       <div
         className={cn(
-          "max-w-[92%] rounded-[1.35rem] p-5 text-sm leading-7 md:max-w-[85%]",
+          "min-w-0 max-w-[92%] rounded-[1.35rem] p-4 text-sm leading-7 md:max-w-[85%] sm:p-5",
           isAssistant ? "bg-black/35 text-card-foreground shadow-[inset_0_0_0_1px_rgba(215,196,154,0.08)]" : "bg-diamond-champagne/[0.09] text-diamond-pearl shadow-[inset_0_0_0_1px_rgba(215,196,154,0.14)]"
         )}
       >
-        <p className="text-[0.68rem] uppercase tracking-[0.22em] text-diamond-champagne/55">{formatTime(message.createdAt)}</p>
+        <p className="text-[0.68rem] uppercase tracking-[0.22em] text-diamond-champagne/55">
+          {message.id === initialAssistantMessage.id ? t("Now", "الآن") : formatTime(message.createdAt)}
+        </p>
         {stream && isAssistant ? <StreamingMessage content={content} /> : <RichMessage content={content} />}
       </div>
     </motion.div>
@@ -1220,11 +1222,11 @@ function ChatImageStudies({
   if (!concepts.length && !isGenerating && !readyForGeneration) return null;
 
   return (
-    <motion.div layout initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="flex gap-4">
+    <motion.div layout initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="flex min-w-0 gap-3 sm:gap-4">
       <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-diamond-champagne shadow-[inset_0_0_0_1px_rgba(215,196,154,0.24),0_12px_30px_rgba(0,0,0,0.28)]">
         <Gem className="h-5 w-5" />
       </div>
-      <div className="w-full rounded-[1.35rem] bg-black/35 p-5 shadow-[inset_0_0_0_1px_rgba(215,196,154,0.08)]">
+      <div className="min-w-0 flex-1 rounded-[1.35rem] bg-black/35 p-4 shadow-[inset_0_0_0_1px_rgba(215,196,154,0.08)] sm:p-5">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <div>
             <p className="text-[0.68rem] uppercase tracking-[0.22em] text-diamond-champagne/55">{t("Image studies", "دراسات بصرية")}</p>
@@ -1247,7 +1249,7 @@ function ChatImageStudies({
             <LoadingSkeleton className="aspect-[4/5] rounded-2xl" />
           </div>
         ) : concepts.length ? (
-          <div className="grid gap-3 md:grid-cols-2 2xl:grid-cols-3">
+          <div className="grid min-w-0 gap-3 md:grid-cols-2 2xl:grid-cols-3">
             {concepts.map((concept) => {
               const finalized = concept.id === finalizedConceptId;
               const revisionUnlocked = revisionUnlockedIds.has(concept.id);
@@ -1401,7 +1403,7 @@ function StudioPanel({
       : "";
 
   return (
-    <motion.aside initial={{ opacity: 0, x: 12 }} animate={{ opacity: 1, x: 0 }} className="space-y-5">
+    <motion.aside initial={{ opacity: 0, x: 12 }} animate={{ opacity: 1, x: 0 }} className="min-w-0 space-y-5">
       <Card>
         <CardHeader>
           <div className="flex items-center justify-between gap-3">

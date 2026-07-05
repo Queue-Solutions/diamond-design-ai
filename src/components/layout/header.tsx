@@ -48,14 +48,14 @@ export function Header() {
           <Sparkles className="h-4 w-4 text-diamond-champagne/70 ltr:mr-3 rtl:ml-3" />
           <span className="truncate text-sm">{t("Private diamond design studio", "استوديو خاص لتصميم المجوهرات")}</span>
         </div>
-        <div className="ml-auto flex items-center gap-3">
+        <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-2 sm:gap-3">
           <Button variant="ghost" size="sm" onClick={toggleLanguage} aria-label={t("Switch to Arabic", "التبديل إلى الإنجليزية")}>
             {isArabic ? "EN" : "عربي"}
           </Button>
-          <Button asChild variant="secondary">
+          <Button asChild variant="secondary" className="hidden sm:inline-flex">
             <Link href="/gallery">{t("View Gallery", "عرض التصاميم")}</Link>
           </Button>
-          <Button asChild>
+          <Button asChild className="hidden sm:inline-flex">
             <Link href="/chat">{t("New Design", "تصميم جديد")}</Link>
           </Button>
           <AuthButton />
