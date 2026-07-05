@@ -7,9 +7,15 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { navigationItems } from "@/config/navigation";
 import { AuthButton } from "@/components/auth/auth-button";
 import { useLanguage } from "@/lib/language";
+import { diamondSessionStorageKey } from "@/lib/session-store";
 
 export function Header() {
   const { isArabic, toggleLanguage, t } = useLanguage();
+
+  function startNewDesign() {
+    window.localStorage.removeItem(diamondSessionStorageKey);
+    window.location.assign(`/chat?newDesign=${Date.now()}`);
+  }
 
   return (
     <header className="sticky top-0 z-30 bg-[#050505]/82 backdrop-blur-xl">
@@ -55,8 +61,8 @@ export function Header() {
           <Button asChild variant="secondary" className="hidden sm:inline-flex">
             <Link href="/gallery">{t("View Gallery", "عرض التصاميم")}</Link>
           </Button>
-          <Button asChild className="hidden sm:inline-flex">
-            <Link href="/chat">{t("New Design", "تصميم جديد")}</Link>
+          <Button className="hidden sm:inline-flex" onClick={startNewDesign}>
+            {t("New Design", "تصميم جديد")}
           </Button>
           <AuthButton />
         </div>

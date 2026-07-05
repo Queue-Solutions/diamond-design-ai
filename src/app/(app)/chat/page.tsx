@@ -147,7 +147,7 @@ export default function ChatPage() {
   );
 
   const activeConcept = useMemo(
-    () => sortedConcepts.find((concept) => concept.id === selectedConceptId) ?? sortedConcepts[0] ?? null,
+    () => sortedConcepts.find((concept) => concept.id === selectedConceptId) ?? sortedConcepts[sortedConcepts.length - 1] ?? null,
     [selectedConceptId, sortedConcepts]
   );
 
@@ -275,11 +275,12 @@ export default function ChatPage() {
 
   useEffect(() => {
     scrollRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-  }, [messages, isSending]);
+  }, [generatedConcepts, isGenerating, messages, isSending]);
 
   useEffect(() => {
-    if (!selectedConceptId && sortedConcepts[0]) {
-      setSelectedConceptId(sortedConcepts[0].id);
+    const latestConcept = sortedConcepts[sortedConcepts.length - 1];
+    if (!selectedConceptId && latestConcept) {
+      setSelectedConceptId(latestConcept.id);
     }
   }, [selectedConceptId, sortedConcepts]);
 
@@ -421,7 +422,7 @@ export default function ChatPage() {
       if (!response.ok) throw new Error(payload.error ?? "The design concepts could not be generated. Please try again.");
       if (!payload.images?.length) throw new Error("No design concepts were returned. Please try again.");
 
-      setGeneratedConcepts(payload.images);
+      setGeneratedConcepts((current) => [...current, ...(payload.images ?? [])]);
       if (payload.sessionId) setSessionId(payload.sessionId);
       setSelectedConceptId(payload.images[0].id);
       setDesignBrief(null);
@@ -568,6 +569,7 @@ export default function ChatPage() {
       }
     } catch (uploadIssue) {
       setError(uploadIssue instanceof Error ? uploadIssue.message : "The uploaded reference could not be saved.");
+      return;
     }
 
     setGeneratedConcepts((current) => [...current, persistedConcept]);
@@ -681,7 +683,7 @@ export default function ChatPage() {
 
       {error ? <LuxuryAlert message={error} onRetry={() => setError("")} /> : null}
 
-      <div className="relative grid min-w-0 gap-6 xl:grid-cols-[minmax(0,1fr)_23rem]">
+      <div className="relative min-w-0">
         <div className="min-w-0 space-y-6">
           <ConversationPanel
             messages={messages}
@@ -721,56 +723,6 @@ export default function ChatPage() {
             scrollRef={scrollRef}
           />
         </div>
-
-        <StudioPanel
-          profile={designProfile}
-          stage={stage}
-          completion={completion}
-          visibleProfile={visibleProfile}
-          concepts={sortedConcepts}
-          activeConceptId={activeConcept?.id ?? ""}
-          isGenerating={isGenerating}
-          isGeneratingBrief={isGeneratingBrief}
-          finalizedConcept={finalizedConcept}
-          designBrief={designBrief}
-          referenceId={referenceId}
-          usage={usage}
-          isSignedIn={Boolean(user)}
-          onGenerate={() => void generateConcepts()}
-          onUpload={() => setUploadOpen(true)}
-          onSelect={setSelectedConceptId}
-          onCopySummary={async () => {
-            if (!designBrief || !finalizedConcept) return;
-            try {
-              await navigator.clipboard.writeText(createBriefText(designBrief, finalizedConcept));
-            } catch {
-              setError("Copy failed. Your browser may require clipboard permission.");
-            }
-          }}
-          onCopyReference={async () => {
-            try {
-              if (referenceId) await navigator.clipboard.writeText(referenceId);
-            } catch {
-              setError("Copy failed. Your browser may require clipboard permission.");
-            }
-          }}
-          onDownloadPdf={() => {
-            if (designBrief && finalizedConcept) {
-              void downloadDesignPdf({ concept: finalizedConcept, brief: designBrief, profile: designProfile }).catch(() =>
-                setError("PDF export could not be completed. Try the print option as a fallback.")
-              );
-            }
-          }}
-          onDownloadPng={() => {
-            if (designBrief && finalizedConcept) {
-              void downloadWorkshopPng({ concept: finalizedConcept, brief: designBrief, profile: designProfile }).catch(() =>
-                setError("PNG export could not be completed. The source image may block browser export.")
-              );
-            }
-          }}
-        onPrint={() => window.print()}
-          onImageError={() => void refreshSessionImages()}
-        />
       </div>
 
       <EditConceptDialog
@@ -797,6 +749,9 @@ export default function ChatPage() {
           if (!open) setPreviewConcept(null);
         }}
         onNavigate={setPreviewConcept}
+        onDownload={(concept) => {
+          void downloadImageFile(concept).catch(() => setError("Image download could not be completed. Please try again."));
+        }}
         onImageError={() => void refreshSessionImages()}
       />
 
@@ -940,8 +895,8 @@ function ConversationPanel({
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_18%_0%,rgba(215,196,154,0.11),transparent_25rem)]" />
       <div className="absolute inset-x-10 top-0 h-px bg-gradient-to-r from-transparent via-diamond-champagne/35 to-transparent" />
 
-      <div className="relative grid min-w-0 gap-7 p-4 sm:p-6 md:p-8 xl:grid-cols-[16rem_minmax(0,1fr)]">
-        <div className="flex flex-col justify-between gap-8 border-b border-diamond-champagne/10 pb-6 xl:border-b-0 xl:border-r xl:pb-0 xl:pr-7">
+      <div className="relative grid min-w-0 gap-7 p-4 sm:p-6 md:p-8">
+        <div className="hidden">
           <div>
             <div className="mb-6 inline-flex items-center gap-2 rounded-full bg-white/[0.035] px-4 py-2 text-xs uppercase tracking-[0.24em] text-diamond-champagne/75 shadow-[inset_0_0_0_1px_rgba(215,196,154,0.10)]">
                 <Sparkles className="h-3.5 w-3.5" />
@@ -998,7 +953,7 @@ function ConversationPanel({
           </div>
         </div>
 
-        <div className="flex min-h-[42rem] min-w-0 flex-col">
+        <div className="mx-auto flex min-h-[42rem] w-full max-w-5xl min-w-0 flex-col">
           <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
             <div>
               <p className="text-xs uppercase tracking-[0.26em] text-diamond-champagne/70">{t("Master designer", "المصمم الرئيسي")}</p>
@@ -1227,7 +1182,7 @@ function ChatImageStudies({
         <Gem className="h-5 w-5" />
       </div>
       <div className="min-w-0 flex-1 rounded-[1.35rem] bg-black/35 p-4 shadow-[inset_0_0_0_1px_rgba(215,196,154,0.08)] sm:p-5">
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <div className="mb-4 hidden flex-wrap items-center justify-between gap-3">
           <div>
             <p className="text-[0.68rem] uppercase tracking-[0.22em] text-diamond-champagne/55">{t("Image studies", "دراسات بصرية")}</p>
             <h3 className="mt-1 font-display text-2xl font-medium text-diamond-pearl">
@@ -1243,13 +1198,12 @@ function ChatImageStudies({
         </div>
 
         {isGenerating ? (
-          <div className="grid gap-3 md:grid-cols-3">
+          <div className="max-w-xl">
             <LoadingSkeleton className="aspect-[4/5] rounded-2xl" />
-            <LoadingSkeleton className="aspect-[4/5] rounded-2xl" />
-            <LoadingSkeleton className="aspect-[4/5] rounded-2xl" />
+            <p className="mt-3 px-1 text-sm text-muted-foreground">{t("Creating one diamond image...", "Creating one diamond image...")}</p>
           </div>
         ) : concepts.length ? (
-          <div className="grid min-w-0 gap-3 md:grid-cols-2 2xl:grid-cols-3">
+          <div className="flex min-w-0 flex-col gap-4">
             {concepts.map((concept) => {
               const finalized = concept.id === finalizedConceptId;
               const revisionUnlocked = revisionUnlockedIds.has(concept.id);
@@ -1257,46 +1211,46 @@ function ChatImageStudies({
                 <article
                   key={concept.id}
                   className={cn(
-                    "group overflow-hidden rounded-[1.2rem] bg-[#090909] shadow-[inset_0_0_0_1px_rgba(215,196,154,0.08)] transition hover:shadow-[inset_0_0_0_1px_rgba(215,196,154,0.22),0_18px_50px_rgba(0,0,0,0.28)]",
+                    "group relative max-w-xl overflow-hidden rounded-[1.2rem] bg-transparent transition",
                     concept.id === activeConceptId && "shadow-[inset_0_0_0_1px_rgba(215,196,154,0.34),0_18px_55px_rgba(0,0,0,0.32)]"
                   )}
                 >
                   <button
                     type="button"
-                    className="relative block aspect-[4/5] w-full overflow-hidden text-left focus-visible:outline-none focus-visible:shadow-[inset_0_0_0_3px_rgba(215,196,154,0.18)]"
+                    className="relative block aspect-[4/5] w-full overflow-hidden rounded-[1.2rem] text-left focus-visible:outline-none focus-visible:shadow-[inset_0_0_0_3px_rgba(215,196,154,0.18)]"
                     onClick={() => {
                       onSelect(concept.id);
                       onPreview(concept);
                     }}
                   >
                     <img src={concept.url} alt={concept.variationName} loading="lazy" onError={onImageError} className="h-full w-full object-cover transition duration-500 group-hover:scale-[1.03]" />
-                    <div className="absolute left-3 top-3 rounded-full bg-black/60 px-3 py-1 text-xs text-diamond-champagne shadow-[inset_0_0_0_1px_rgba(215,196,154,0.16)] backdrop-blur">
+                    <div className="hidden">
                       V{concept.version}
                     </div>
                     {finalized ? (
-                      <div className="absolute right-3 top-3 rounded-full bg-diamond-champagne/20 px-3 py-1 text-xs text-white shadow-[inset_0_0_0_1px_rgba(215,196,154,0.20)] backdrop-blur">
+                      <div className="hidden">
                         {t("Final", "نهائي")}
                       </div>
                     ) : null}
                   </button>
-                  <div className="space-y-3 p-3">
-                    <div>
+                  <div className="p-0">
+                    <div className="hidden">
                       <p className="text-xs uppercase tracking-[0.16em] text-diamond-champagne/65">{concept.variationName}</p>
                       <p className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground">{concept.description}</p>
                     </div>
-                    <div className="flex flex-wrap gap-2">
-                      <Button variant="secondary" size="sm" onClick={() => (finalized && !revisionUnlocked ? onCreateRevision(concept) : onEdit(concept))} disabled={aiDisabled}>
+                    <div className="absolute right-3 top-3">
+                      <Button className="hidden" variant="secondary" size="sm" onClick={() => (finalized && !revisionUnlocked ? onCreateRevision(concept) : onEdit(concept))} disabled={aiDisabled}>
                         <Wand2 className="h-4 w-4" />
                         {finalized && !revisionUnlocked ? t("Revise", "تنقيح") : t("Edit", "تعديل")}
                       </Button>
-                      <Button variant="outline" size="sm" onClick={() => onFinalize(concept)} disabled={finalized}>
+                      <Button className="hidden" variant="outline" size="sm" onClick={() => onFinalize(concept)} disabled={finalized}>
                         <Check className="h-4 w-4" />
                         {t("Final", "نهائي")}
                       </Button>
                       <IconButton label="Favorite concept" active={favoriteIds.has(concept.id)} onClick={() => onFavorite(concept.id)}>
                         <Heart className={cn("h-4 w-4", favoriteIds.has(concept.id) && "fill-diamond-champagne")} />
                       </IconButton>
-                      <IconButton label="Compare concept" active={comparisonIds.includes(concept.id)} onClick={() => onCompare(concept.id)}>
+                      <IconButton label="Compare concept" active={comparisonIds.includes(concept.id)} onClick={() => onCompare(concept.id)} hidden>
                         <Columns2 className="h-4 w-4" />
                       </IconButton>
                     </div>
@@ -1329,11 +1283,13 @@ function IconButton({
   label,
   active,
   onClick,
+  hidden,
   children
 }: {
   label: string;
   active?: boolean;
   onClick: (event: React.MouseEvent<HTMLButtonElement>) => void;
+  hidden?: boolean;
   children: React.ReactNode;
 }) {
   return (
@@ -1341,7 +1297,7 @@ function IconButton({
       type="button"
       aria-label={label}
       onClick={onClick}
-      className={cn("flex h-9 w-9 items-center justify-center rounded-full border bg-black/60 text-white backdrop-blur transition hover:bg-white/15", active && "border-diamond-champagne text-diamond-champagne")}
+      className={cn("flex h-9 w-9 items-center justify-center rounded-full border bg-black/60 text-white backdrop-blur transition hover:bg-white/15", active && "border-diamond-champagne text-diamond-champagne", hidden && "hidden")}
     >
       {children}
     </button>
@@ -1690,9 +1646,9 @@ function UploadReferenceDialog({
             <p className="mt-2 max-w-sm text-sm leading-6 text-muted-foreground">
               PNG, JPG, JPEG, or WEBP. Maximum 10MB. PDF, SVG, HEIC, and videos are not accepted.
             </p>
-            <Button className="mt-5" type="button" variant="secondary">
+            <span className="mt-5 inline-flex h-10 items-center justify-center rounded-full bg-secondary px-4 text-sm font-medium text-secondary-foreground shadow-luxury transition hover:brightness-110">
               Browse files
-            </Button>
+            </span>
           </label>
 
           <div className="space-y-4">
@@ -1891,12 +1847,14 @@ function PreviewDialog({
   concepts,
   onOpenChange,
   onNavigate,
+  onDownload,
   onImageError
 }: {
   concept: GeneratedConcept | null;
   concepts: GeneratedConcept[];
   onOpenChange: (open: boolean) => void;
   onNavigate: (concept: GeneratedConcept) => void;
+  onDownload: (concept: GeneratedConcept) => void;
   onImageError: () => void;
 }) {
   const index = concept ? concepts.findIndex((item) => item.id === concept.id) : -1;
@@ -1913,12 +1871,17 @@ function PreviewDialog({
                 <div>
                   <p className="text-xs uppercase tracking-[0.18em] text-diamond-champagne/70">Private preview</p>
                   <h2 className="font-display mt-1 text-2xl font-medium text-white">
-                    V{concept.version} - {concept.variationName}
+                    {concept.variationName}
                   </h2>
                 </div>
-                <Button size="icon" variant="ghost" aria-label="Close preview" onClick={() => onOpenChange(false)}>
-                  <X className="h-5 w-5" />
-                </Button>
+                <div className="flex items-center gap-2">
+                  <Button size="icon" variant="ghost" aria-label="Download image" onClick={() => onDownload(concept)}>
+                    <Download className="h-5 w-5" />
+                  </Button>
+                  <Button size="icon" variant="ghost" aria-label="Close preview" onClick={() => onOpenChange(false)}>
+                    <X className="h-5 w-5" />
+                  </Button>
+                </div>
               </div>
               <div className="relative flex flex-1 items-center justify-center p-8">
                 {canNavigate ? (
@@ -2023,6 +1986,30 @@ function formatBytes(bytes: number) {
   }
 
   return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
+}
+
+async function downloadImageFile(concept: GeneratedConcept) {
+  const response = await fetch(concept.url);
+  if (!response.ok) throw new Error("Image download failed.");
+
+  const blob = await response.blob();
+  const extension = blob.type.split("/")[1]?.replace("jpeg", "jpg") || "png";
+  const objectUrl = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = objectUrl;
+  link.download = `${safeFileName(concept.variationName || "diamond-design")}.${extension}`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(objectUrl);
+}
+
+function safeFileName(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)/g, "")
+    .slice(0, 48) || "diamond-design";
 }
 
 function cleanClientSuggestions(actions: unknown): string[] {
