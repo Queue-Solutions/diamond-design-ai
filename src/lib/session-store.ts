@@ -26,58 +26,58 @@ export type PersistedSavedDesigns = {
   finalizedConceptId: string;
 };
 
-export function loadDiamondSession(): PersistedDiamondSession | null {
+export function loadDiamondSession(userId?: string): PersistedDiamondSession | null {
   if (typeof window === "undefined") return null;
 
   try {
-    const raw = window.localStorage.getItem(diamondSessionStorageKey);
+    const raw = window.localStorage.getItem(scopedStorageKey(diamondSessionStorageKey, userId));
     return raw ? (JSON.parse(raw) as PersistedDiamondSession) : null;
   } catch {
     return null;
   }
 }
 
-export function saveDiamondSession(session: PersistedDiamondSession) {
+export function saveDiamondSession(session: PersistedDiamondSession, userId?: string) {
   if (typeof window === "undefined") return;
 
   try {
-    window.localStorage.setItem(diamondSessionStorageKey, JSON.stringify(session));
-    syncSavedDesigns(session);
+    window.localStorage.setItem(scopedStorageKey(diamondSessionStorageKey, userId), JSON.stringify(session));
+    syncSavedDesigns(session, userId);
   } catch (error) {
     console.warn("Diamond session could not be saved locally.", error);
   }
 }
 
-export function clearDiamondSession() {
+export function clearDiamondSession(userId?: string) {
   if (typeof window === "undefined") return;
-  window.localStorage.removeItem(diamondSessionStorageKey);
+  window.localStorage.removeItem(scopedStorageKey(diamondSessionStorageKey, userId));
 }
 
-export function loadSavedDesigns(): PersistedSavedDesigns | null {
+export function loadSavedDesigns(userId?: string): PersistedSavedDesigns | null {
   if (typeof window === "undefined") return null;
 
   try {
-    const raw = window.localStorage.getItem(diamondSavedDesignsStorageKey);
+    const raw = window.localStorage.getItem(scopedStorageKey(diamondSavedDesignsStorageKey, userId));
     return raw ? (JSON.parse(raw) as PersistedSavedDesigns) : null;
   } catch {
     return null;
   }
 }
 
-export function saveSavedDesigns(savedDesigns: PersistedSavedDesigns) {
+export function saveSavedDesigns(savedDesigns: PersistedSavedDesigns, userId?: string) {
   if (typeof window === "undefined") return;
 
   try {
-    window.localStorage.setItem(diamondSavedDesignsStorageKey, JSON.stringify(savedDesigns));
+    window.localStorage.setItem(scopedStorageKey(diamondSavedDesignsStorageKey, userId), JSON.stringify(savedDesigns));
   } catch (error) {
     console.warn("Saved designs could not be saved locally.", error);
   }
 }
 
-function syncSavedDesigns(session: PersistedDiamondSession) {
+function syncSavedDesigns(session: PersistedDiamondSession, userId?: string) {
   if (!session.generatedConcepts.length) return;
 
-  const currentSaved = loadSavedDesigns() ?? {
+  const currentSaved = loadSavedDesigns(userId) ?? {
     generatedConcepts: [],
     favoriteIds: [],
     finalizedConceptId: ""
@@ -103,5 +103,9 @@ function syncSavedDesigns(session: PersistedDiamondSession) {
     generatedConcepts: Array.from(concepts.values()),
     favoriteIds: Array.from(nextFavoriteIds),
     finalizedConceptId: session.finalizedConceptId || currentSaved.finalizedConceptId
-  });
+  }, userId);
+}
+
+function scopedStorageKey(baseKey: string, userId?: string) {
+  return `${baseKey}:${userId || "anonymous"}`;
 }

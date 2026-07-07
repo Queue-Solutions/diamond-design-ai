@@ -17,16 +17,18 @@ import {
 } from "@/lib/session-store";
 import type { GeneratedConcept } from "@/types/design";
 import { useLanguage } from "@/lib/language";
+import { useAuth } from "@/components/auth/auth-provider";
 
 export default function GalleryPage() {
   const { t } = useLanguage();
+  const { user } = useAuth();
   const [session, setSession] = useState<PersistedDiamondSession | null>(null);
   const [savedDesigns, setSavedDesigns] = useState<PersistedSavedDesigns | null>(null);
 
   useEffect(() => {
-    setSession(loadDiamondSession());
-    setSavedDesigns(loadSavedDesigns());
-  }, []);
+    setSession(loadDiamondSession(user?.id));
+    setSavedDesigns(loadSavedDesigns(user?.id));
+  }, [user?.id]);
 
   const concepts = useMemo(
     () =>
@@ -44,12 +46,15 @@ export default function GalleryPage() {
       const nextSavedIds = new Set(saved?.favoriteIds ?? []);
       if (nextSavedIds.has(id)) nextSavedIds.delete(id);
       else nextSavedIds.add(id);
+      const conceptById = new Map(concepts.map((concept) => [concept.id, concept]));
       const nextSaved = {
-        generatedConcepts: mergeConcepts(saved?.generatedConcepts ?? [], session?.generatedConcepts ?? []),
+        generatedConcepts: Array.from(nextSavedIds)
+          .map((conceptId) => conceptById.get(conceptId))
+          .filter((concept): concept is GeneratedConcept => Boolean(concept)),
         favoriteIds: Array.from(nextSavedIds),
         finalizedConceptId: saved?.finalizedConceptId ?? session?.finalizedConceptId ?? ""
       };
-      saveSavedDesigns(nextSaved);
+      saveSavedDesigns(nextSaved, user?.id);
       return nextSaved;
     });
 
@@ -59,7 +64,7 @@ export default function GalleryPage() {
       if (nextFavoriteIds.has(id)) nextFavoriteIds.delete(id);
       else nextFavoriteIds.add(id);
       const nextSession = { ...current, favoriteIds: Array.from(nextFavoriteIds) };
-      saveDiamondSession(nextSession);
+      saveDiamondSession(nextSession, user?.id);
       return nextSession;
     });
   }

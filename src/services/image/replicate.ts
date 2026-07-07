@@ -77,17 +77,22 @@ export class ReplicateImageProvider implements ImageGenerationProvider {
   }
 
   async editDesign(request: EditDesignProviderRequest): Promise<GeneratedImage> {
-    const output = await withTimeout(
-      this.client.run(editModel, {
-        input: {
-          prompt: request.prompt,
-          input_image: request.imageUrl,
-          output_format: "webp",
-          safety_tolerance: 2
-        }
-      }) as Promise<ReplicateOutput>,
-      requestTimeoutMs
-    );
+    let output: ReplicateOutput;
+    try {
+      output = await withTimeout(
+        this.client.run(editModel, {
+          input: {
+            prompt: request.prompt,
+            input_image: request.imageUrl,
+            output_format: "webp",
+            safety_tolerance: 2
+          }
+        }) as Promise<ReplicateOutput>,
+        requestTimeoutMs
+      );
+    } catch (error) {
+      throw new ImageGenerationError(`Replicate image edit failed: ${getErrorMessage(error)}`);
+    }
 
     const url = extractImageUrl(output);
 
@@ -110,6 +115,12 @@ export class ReplicateImageProvider implements ImageGenerationProvider {
       createdAt: new Date().toISOString()
     };
   }
+}
+
+function getErrorMessage(error: unknown) {
+  if (error instanceof Error && error.message.trim()) return error.message;
+  if (typeof error === "string" && error.trim()) return error;
+  return "The image provider rejected the edit request.";
 }
 
 function summarizeEdit(instruction: string) {

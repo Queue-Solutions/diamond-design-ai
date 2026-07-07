@@ -175,7 +175,7 @@ export default function ChatPage() {
     .filter((concept): concept is GeneratedConcept => Boolean(concept));
 
   useEffect(() => {
-    const saved = loadDiamondSession();
+    const saved = loadDiamondSession(user?.id);
     if (saved) {
       setMessages(saved.messages.length ? saved.messages : [initialAssistantMessage]);
       setDesignProfile(saved.designProfile);
@@ -189,9 +189,23 @@ export default function ChatPage() {
       setComparisonIds(saved.comparisonIds);
       setRevisionUnlockedIds(new Set(saved.revisionUnlockedIds));
       setSessionId(saved.sessionId ?? "");
+    } else {
+      setMessages([{ ...initialAssistantMessage, createdAt: new Date().toISOString() }]);
+      setDesignProfile(emptyDesignProfile);
+      setStage("discovery");
+      setSuggestedActions(initialSuggestions);
+      setInput("");
+      setGeneratedConcepts([]);
+      setSelectedConceptId("");
+      setFinalizedConceptId("");
+      setDesignBrief(null);
+      setFavoriteIds(new Set());
+      setComparisonIds([]);
+      setRevisionUnlockedIds(new Set());
+      setSessionId("");
     }
     setSessionLoaded(true);
-  }, []);
+  }, [user?.id]);
 
   useEffect(() => {
     if (!user) {
@@ -205,20 +219,23 @@ export default function ChatPage() {
   useEffect(() => {
     if (!sessionLoaded) return;
 
-    saveDiamondSession({
-      messages,
-      designProfile,
-      stage,
-      suggestedActions,
-      generatedConcepts,
-      selectedConceptId,
-      finalizedConceptId,
-      designBrief,
-      favoriteIds: Array.from(favoriteIds),
-      comparisonIds,
-      revisionUnlockedIds: Array.from(revisionUnlockedIds),
-      sessionId
-    });
+    saveDiamondSession(
+      {
+        messages,
+        designProfile,
+        stage,
+        suggestedActions,
+        generatedConcepts,
+        selectedConceptId,
+        finalizedConceptId,
+        designBrief,
+        favoriteIds: Array.from(favoriteIds),
+        comparisonIds,
+        revisionUnlockedIds: Array.from(revisionUnlockedIds),
+        sessionId
+      },
+      user?.id
+    );
   }, [
     comparisonIds,
     designBrief,
@@ -232,7 +249,8 @@ export default function ChatPage() {
     sessionLoaded,
     sessionId,
     stage,
-    suggestedActions
+    suggestedActions,
+    user?.id
   ]);
 
   async function authHeaders(): Promise<Record<string, string>> {
@@ -699,7 +717,7 @@ export default function ChatPage() {
   }
 
   function resetSession() {
-    clearDiamondSession();
+    clearDiamondSession(user?.id);
     setMessages([
       {
         ...initialAssistantMessage,

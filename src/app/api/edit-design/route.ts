@@ -8,6 +8,7 @@ import { updateDesignProfileFromEdit } from "@/lib/edit-profile";
 import { requireRateLimit } from "@/lib/rate-limit";
 import {
   getOrCreateDesignSession,
+  getEditableImageUrlForUser,
   markUsageEventFailed,
   markUsageEventSucceeded,
   mapImageRecordToConcept,
@@ -105,8 +106,14 @@ export async function POST(request: Request) {
 
     try {
       const provider = new ReplicateImageProvider();
+      const resolvedImageUrl = await resolveSourceImageUrl({
+        userId: auth.user.id,
+        sessionId,
+        sourceImageId: body.sourceImageId,
+        imageUrl: body.imageUrl
+      });
       const image = await provider.editDesign({
-        imageUrl: body.imageUrl,
+        imageUrl: resolvedImageUrl,
         prompt,
         editInstruction,
         sourceImageId: body.sourceImageId,
@@ -186,6 +193,34 @@ export async function POST(request: Request) {
 
 export function GET() {
   return methodNotAllowed();
+}
+
+async function resolveSourceImageUrl({
+  userId,
+  sessionId,
+  sourceImageId,
+  imageUrl
+}: {
+  userId: string;
+  sessionId: string;
+  sourceImageId: string;
+  imageUrl: string;
+}) {
+  const storedImageUrl = await getEditableImageUrlForUser(userId, sourceImageId);
+  if (storedImageUrl) return storedImageUrl;
+
+  try {
+    const storedReference = await storeImageFromUrl({
+      url: imageUrl,
+      userId,
+      sessionId,
+      imageId: sourceImageId
+    });
+    return storedReference.signedUrl;
+  } catch (error) {
+    console.warn("Source image could not be copied before edit; using submitted URL.", error);
+    return imageUrl;
+  }
 }
 
 function isValidUrl(value: string) {

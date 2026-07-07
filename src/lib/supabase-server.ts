@@ -531,6 +531,22 @@ export async function mapImageRecordsToConcepts(records: PersistedImageRecord[])
   return refreshSignedUrlsForConcepts(concepts);
 }
 
+export async function getEditableImageUrlForUser(userId: string, imageId: string) {
+  const admin = createAdminSupabaseClient();
+  if (!admin) return null;
+
+  const { data } = await admin
+    .from("design_images")
+    .select("image_url,storage_path")
+    .eq("id", imageId)
+    .eq("user_id", userId)
+    .maybeSingle<{ image_url: string | null; storage_path: string | null }>();
+
+  if (!data) return null;
+  if (data.storage_path) return createSignedImageUrl(data.storage_path);
+  return data.image_url ?? null;
+}
+
 async function existingImageId(userId: string, id?: string | null) {
   if (!id) return null;
   const admin = createAdminSupabaseClient();
