@@ -395,7 +395,30 @@ export default function ChatPage() {
     setError("");
     setIsSending(true);
 
+    const sourceConcept = activeConcept ?? sortedConcepts[sortedConcepts.length - 1] ?? null;
+    const shouldEditSource = Boolean(sourceConcept && isImageEditRequest(trimmed));
+    const shouldCreateImage = isImageCreationRequest(trimmed);
+
     try {
+      if (shouldEditSource && sourceConcept) {
+        setIsSending(false);
+        await editConceptFromChat(sourceConcept, trimmed);
+        return;
+      }
+
+      if (shouldCreateImage) {
+        const latestEditInstruction = sourceConcept ? latestImageEditInstruction(nextMessages) : "";
+        if (sourceConcept && latestEditInstruction) {
+          setIsSending(false);
+          await editConceptFromChat(sourceConcept, latestEditInstruction);
+          return;
+        }
+
+        setIsSending(false);
+        await generateConcepts({ forceReady: true });
+        return;
+      }
+
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json", ...(await authHeaders()) },
@@ -416,6 +439,11 @@ export default function ChatPage() {
       setDesignProfile(normalizeDesignProfile(payload.updatedDesignProfile));
       setStage(payload.stage ?? "discovery");
       setSuggestedActions(cleanClientSuggestions(payload.suggestedActions));
+
+      const updatedProfile = normalizeDesignProfile(payload.updatedDesignProfile);
+      if (updatedProfile.readyForGeneration && isImageCreationRequest(payload.assistantMessage ?? "")) {
+        await generateConcepts({ profileOverride: updatedProfile });
+      }
     } catch (sendError) {
       setError(sendError instanceof Error ? sendError.message : "Something went wrong. Please try again.");
     } finally {
@@ -423,8 +451,10 @@ export default function ChatPage() {
     }
   }
 
-  async function generateConcepts() {
-    if (!designProfile.readyForGeneration || isGenerating) return;
+  async function generateConcepts(options?: { forceReady?: boolean; profileOverride?: DesignProfile }) {
+    const generationProfile = options?.profileOverride ?? designProfile;
+    const readyForGeneration = options?.forceReady || generationProfile.readyForGeneration;
+    if (!readyForGeneration || isGenerating) return;
     if (!user && !(isDemoMode && !process.env.NEXT_PUBLIC_SUPABASE_URL)) {
       setError("Sign in to save your designs and generate AI concepts.");
       return;
@@ -441,7 +471,11 @@ export default function ChatPage() {
       const response = await fetch("/api/generate-designs", {
         method: "POST",
         headers: { "Content-Type": "application/json", ...(await authHeaders()) },
-        body: JSON.stringify({ designProfile, conversationContext: messages, sessionId })
+        body: JSON.stringify({
+          designProfile: { ...generationProfile, readyForGeneration: true },
+          conversationContext: messages,
+          sessionId
+        })
       });
       const payload = (await response.json()) as { images?: GeneratedConcept[]; error?: string; demoMode?: boolean; sessionId?: string };
       if (!response.ok) throw new Error(payload.error ?? "The design concepts could not be generated. Please try again.");
@@ -466,6 +500,10 @@ export default function ChatPage() {
   async function submitEdit() {
     const instruction = editInstruction.trim();
     if (!selectedConcept || !instruction || isEditing) return;
+    await editConceptFromChat(selectedConcept, instruction, { closeDialog: true });
+  }
+
+  async function editConceptFromChat(sourceConcept: GeneratedConcept, instruction: string, options?: { closeDialog?: boolean }) {
     if (!user && !(isDemoMode && !process.env.NEXT_PUBLIC_SUPABASE_URL)) {
       setError("Sign in to save your designs and generate AI concepts.");
       return;
@@ -483,13 +521,13 @@ export default function ChatPage() {
         method: "POST",
         headers: { "Content-Type": "application/json", ...(await authHeaders()) },
         body: JSON.stringify({
-          imageUrl: selectedConcept.url,
+          imageUrl: sourceConcept.url,
           editInstruction: instruction,
           designProfile,
-          sourceImageId: selectedConcept.id,
-          sourceVersion: selectedConcept.version,
-          rootId: selectedConcept.rootId,
-          variationName: selectedConcept.variationName,
+          sourceImageId: sourceConcept.id,
+          sourceVersion: sourceConcept.version,
+          rootId: sourceConcept.rootId,
+          variationName: sourceConcept.variationName,
           sessionId
         })
       });
@@ -512,8 +550,10 @@ export default function ChatPage() {
       if (payload.demoMode) {
         setError("Demo mode created a clearly labeled placeholder edit because Replicate is not configured.");
       }
-      setSelectedConcept(null);
-      setEditInstruction("");
+      if (options?.closeDialog) {
+        setSelectedConcept(null);
+        setEditInstruction("");
+      }
       await refreshUsage();
     } catch (editError) {
       setError(editError instanceof Error ? editError.message : "Image editing failed. Please try again.");
@@ -2185,6 +2225,29 @@ function isUserProvidedConcept(concept: GeneratedConcept) {
       label.includes("customer uploaded reference") ||
       label.includes("reference selected from the inspiration library"))
   );
+}
+
+function isImageCreationRequest(value: string) {
+  const normalized = value.toLowerCase();
+  return /\b(create|generate|make|render|show|produce)\b.*\b(image|concept|design|picture|visual|it)\b/.test(normalized) ||
+    /\b(create|generate|render|produce)\s+(it|this|now)\b/.test(normalized) ||
+    normalized.includes("then create it");
+}
+
+function isImageEditRequest(value: string) {
+  const normalized = value.toLowerCase();
+  if (isImageCreationRequest(normalized) && !/(change|edit|modify|turn|make it|yellow|white|rose|gold|platinum|silver|thinner|thicker|halo|band|stone|diamond|metal|color|colour)/.test(normalized)) {
+    return false;
+  }
+
+  return /(change|edit|modify|turn|replace|keep|preserve|same|make it|make the|yellow|white|rose|gold|platinum|silver|metal|color|colour|thinner|thicker|halo|band|stone|diamond|remove|add)/.test(normalized);
+}
+
+function latestImageEditInstruction(messages: ChatMessage[]) {
+  return [...messages]
+    .reverse()
+    .find((message) => message.role === "user" && isImageEditRequest(message.content) && !isImageCreationRequest(message.content))
+    ?.content.trim() ?? "";
 }
 
 function cleanClientSuggestions(actions: unknown): string[] {

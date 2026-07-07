@@ -44,10 +44,11 @@ export function buildEditPrompt({
   sourceVariationName: string;
 }) {
   return [
-    `Edit this luxury diamond jewelry product photograph: ${editInstruction}`,
-    `Preserve the original ${sourceVariationName} design identity, overall silhouette, camera angle, composition, lighting, and premium studio product photography style where possible`,
+    `Use the provided input image as the source of truth and edit that exact jewelry image: ${editInstruction}`,
+    `Preserve the original ${sourceVariationName} design identity, silhouette, ring geometry, stone count, diamond shapes, setting, band structure, camera angle, crop, composition, background, and lighting`,
+    "Do not redesign the ring, do not invent a new setting, do not change the center stone, side stones, halo, band shape, or camera view unless explicitly requested",
     describeProfile(designProfile),
-    "Apply only the requested change and avoid changing unrelated details",
+    "Apply only the requested change as a localized image edit and avoid changing unrelated details",
     "Keep the jewelry realistic, wearable, premium, and diamond-focused",
     "maintain crisp diamond facets, realistic metal texture, elegant reflections, macro luxury boutique photography",
     "no cartoon, no illustration, no sketch, no CAD, no technical drawing, no unrealistic fantasy output"
