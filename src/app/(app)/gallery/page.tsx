@@ -7,30 +7,52 @@ import Link from "next/link";
 import { Download, Gem, Heart, Image as ImageIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardFooter } from "@/components/ui/card";
-import { loadDiamondSession, saveDiamondSession, type PersistedDiamondSession } from "@/lib/session-store";
+import {
+  loadDiamondSession,
+  loadSavedDesigns,
+  saveDiamondSession,
+  saveSavedDesigns,
+  type PersistedDiamondSession,
+  type PersistedSavedDesigns
+} from "@/lib/session-store";
 import type { GeneratedConcept } from "@/types/design";
 import { useLanguage } from "@/lib/language";
 
 export default function GalleryPage() {
   const { t } = useLanguage();
   const [session, setSession] = useState<PersistedDiamondSession | null>(null);
+  const [savedDesigns, setSavedDesigns] = useState<PersistedSavedDesigns | null>(null);
 
   useEffect(() => {
     setSession(loadDiamondSession());
+    setSavedDesigns(loadSavedDesigns());
   }, []);
 
   const concepts = useMemo(
     () =>
-      [...(session?.generatedConcepts ?? [])].sort((a, b) => {
+      mergeConcepts(savedDesigns?.generatedConcepts ?? [], session?.generatedConcepts ?? []).sort((a, b) => {
         if (a.rootId === b.rootId) return a.version - b.version;
         return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
       }),
-    [session]
+    [savedDesigns, session]
   );
-  const favoriteIds = new Set(session?.favoriteIds ?? []);
+  const favoriteIds = new Set([...(savedDesigns?.favoriteIds ?? []), ...(session?.favoriteIds ?? [])]);
   const savedConcepts = concepts.filter((concept) => favoriteIds.has(concept.id));
 
   function toggleFavorite(id: string) {
+    setSavedDesigns((saved) => {
+      const nextSavedIds = new Set(saved?.favoriteIds ?? []);
+      if (nextSavedIds.has(id)) nextSavedIds.delete(id);
+      else nextSavedIds.add(id);
+      const nextSaved = {
+        generatedConcepts: mergeConcepts(saved?.generatedConcepts ?? [], session?.generatedConcepts ?? []),
+        favoriteIds: Array.from(nextSavedIds),
+        finalizedConceptId: saved?.finalizedConceptId ?? session?.finalizedConceptId ?? ""
+      };
+      saveSavedDesigns(nextSaved);
+      return nextSaved;
+    });
+
     setSession((current) => {
       if (!current) return current;
       const nextFavoriteIds = new Set(current.favoriteIds);
@@ -90,6 +112,14 @@ export default function GalleryPage() {
       )}
     </div>
   );
+}
+
+function mergeConcepts(...groups: GeneratedConcept[][]) {
+  const concepts = new Map<string, GeneratedConcept>();
+  for (const group of groups) {
+    for (const concept of group) concepts.set(concept.id, concept);
+  }
+  return Array.from(concepts.values());
 }
 
 function GalleryConceptCard({

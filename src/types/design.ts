@@ -21,9 +21,27 @@ export type ChatMessage = {
   createdAt: string;
 };
 
+export type ChatImageContext = {
+  id: string;
+  variationName: string;
+  description: string;
+  isUserProvided: boolean;
+  isSelected: boolean;
+  isLatest: boolean;
+};
+
+export type ChatAction =
+  | { type: "chat" }
+  | { type: "ask_clarifying_question"; question?: string }
+  | { type: "generate_image"; instruction?: string; reason?: string }
+  | { type: "edit_image"; targetImageId?: string; editInstruction: string; reason?: string };
+
 export type ChatApiRequest = {
   messages: ChatMessage[];
   designProfile: DesignProfile;
+  sessionId?: string;
+  selectedConceptId?: string;
+  images?: ChatImageContext[];
 };
 
 export type ChatApiResponse = {
@@ -31,6 +49,7 @@ export type ChatApiResponse = {
   updatedDesignProfile: DesignProfile;
   stage: ConversationStage;
   suggestedActions: string[];
+  action: ChatAction;
 };
 
 export type GeneratedConcept = {

@@ -7,7 +7,7 @@ import { normalizeDesignProfile, normalizeStage } from "@/lib/design-profile";
 import { requireRateLimit } from "@/lib/rate-limit";
 import { logUsageEvent, requireAuthenticatedUser } from "@/lib/supabase-server";
 import { MissingOpenAiApiKeyError, OpenAiLlmProvider } from "@/services/llm";
-import type { ChatApiRequest, ChatApiResponse, ChatMessage } from "@/types/design";
+import type { ChatAction, ChatApiRequest, ChatApiResponse, ChatImageContext, ChatMessage } from "@/types/design";
 
 export const runtime = "nodejs";
 
@@ -18,6 +18,7 @@ export async function POST(request: Request) {
     const body = await parseJsonBody<Partial<ChatApiRequest>>(request);
     const messages = normalizeMessages(body.messages);
     const designProfile = normalizeDesignProfile(body.designProfile);
+    const images = normalizeImageContext(body.images);
 
     if (messages.length === 0) {
       throw new ApiInputError("Please send a message to begin the consultation.");
@@ -47,8 +48,10 @@ export async function POST(request: Request) {
             role: "user",
             content: JSON.stringify({
               instruction:
-                "Continue the consultation from these messages. Update the design profile without exposing JSON to the customer.",
+                "Continue the consultation from these messages. Update the design profile and choose the next application action. Return only the required JSON.",
               currentDesignProfile: designProfile,
+              selectedConceptId: typeof body.selectedConceptId === "string" ? body.selectedConceptId : "",
+              images,
               messages: messages.map(({ role, content }) => ({ role, content }))
             })
           }
@@ -93,7 +96,8 @@ export async function POST(request: Request) {
           : fallbackAssistantMessage(stage),
       updatedDesignProfile,
       stage,
-      suggestedActions: normalizeSuggestedActions(parsed.suggestedActions)
+      suggestedActions: normalizeSuggestedActions(parsed.suggestedActions),
+      action: normalizeChatAction(parsed.action, images)
     } satisfies ChatApiResponse);
   } catch (error) {
     if (error instanceof MissingOpenAiApiKeyError) {
@@ -130,6 +134,22 @@ function normalizeMessages(input: unknown): ChatMessage[] {
     .slice(-12);
 }
 
+function normalizeImageContext(input: unknown): ChatImageContext[] {
+  if (!Array.isArray(input)) return [];
+
+  return input
+    .filter((image): image is Partial<ChatImageContext> => typeof image === "object" && image !== null && typeof (image as ChatImageContext).id === "string")
+    .map((image) => ({
+      id: String(image.id).slice(0, 120),
+      variationName: typeof image.variationName === "string" ? image.variationName.slice(0, 120) : "",
+      description: typeof image.description === "string" ? image.description.slice(0, 240) : "",
+      isUserProvided: Boolean(image.isUserProvided),
+      isSelected: Boolean(image.isSelected),
+      isLatest: Boolean(image.isLatest)
+    }))
+    .slice(-12);
+}
+
 function parseModelResponse(content: string): ConsultantModelResponse {
   try {
     return JSON.parse(content) as ConsultantModelResponse;
@@ -156,6 +176,48 @@ function normalizeSuggestedActions(input: unknown): string[] {
     .slice(0, 4);
 
   return actions.length ? actions : ["I prefer solitaire", "Show halo options", "Make it more vintage", "Use yellow gold"];
+}
+
+function normalizeChatAction(input: unknown, images: ChatImageContext[]): ChatAction {
+  if (typeof input !== "object" || input === null || typeof (input as ChatAction).type !== "string") {
+    return { type: "chat" };
+  }
+
+  const action = input as Partial<ChatAction>;
+  if (action.type === "generate_image") {
+    return {
+      type: "generate_image",
+      instruction: typeof action.instruction === "string" ? action.instruction.trim().slice(0, 500) : undefined,
+      reason: typeof action.reason === "string" ? action.reason.trim().slice(0, 240) : undefined
+    };
+  }
+
+  if (action.type === "edit_image") {
+    const editInstruction = typeof action.editInstruction === "string" ? action.editInstruction.trim() : "";
+    if (!editInstruction || images.length === 0) return { type: "chat" };
+
+    const requestedTarget = typeof action.targetImageId === "string" ? action.targetImageId.trim() : "";
+    const knownTarget =
+      requestedTarget === "selected" ||
+      requestedTarget === "latest" ||
+      images.some((image) => image.id === requestedTarget);
+
+    return {
+      type: "edit_image",
+      targetImageId: knownTarget ? requestedTarget : "selected",
+      editInstruction: editInstruction.slice(0, 700),
+      reason: typeof action.reason === "string" ? action.reason.trim().slice(0, 240) : undefined
+    };
+  }
+
+  if (action.type === "ask_clarifying_question") {
+    return {
+      type: "ask_clarifying_question",
+      question: typeof action.question === "string" ? action.question.trim().slice(0, 300) : undefined
+    };
+  }
+
+  return { type: "chat" };
 }
 
 function fallbackAssistantMessage(stage: ChatApiResponse["stage"]) {
@@ -186,6 +248,7 @@ function createDemoChatResponse(profileInput: unknown): ChatApiResponse {
       "Demo mode is active because OpenAI is not configured. I have prepared a sample luxury diamond direction so you can continue the presentation safely.",
     updatedDesignProfile,
     stage: "ready_to_generate",
-    suggestedActions: ["Generate demo concepts", "Make it more minimal", "Change to rose gold"]
+    suggestedActions: ["Generate demo concepts", "Make it more minimal", "Change to rose gold"],
+    action: { type: "chat" }
   };
 }

@@ -42,7 +42,9 @@ import { publicEnv } from "@/config/public-env";
 import { BrowserLocalImageStorage, StorageValidationError, type StoredImage } from "@/services/storage";
 import { useLanguage } from "@/lib/language";
 import {
+  type ChatAction,
   type ChatApiResponse,
+  type ChatImageContext,
   type ChatMessage,
   type DesignBrief,
   type ConversationStage,
@@ -126,7 +128,6 @@ export default function ChatPage() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const imageRefreshInFlightRef = useRef(false);
   const inspirationLoadedRef = useRef(false);
-  const autoGenerationKeyRef = useRef("");
   const storage = useMemo(() => new BrowserLocalImageStorage(), []);
 
   const sortedConcepts = useMemo(
@@ -200,30 +201,6 @@ export default function ChatPage() {
 
     void refreshUsage();
   }, [user]);
-
-  useEffect(() => {
-    const hasAssistantGeneratedImage = generatedConcepts.some((concept) => !isUserProvidedConcept(concept));
-    if (!sessionLoaded || !designProfile.readyForGeneration || isGenerating || isSending || hasAssistantGeneratedImage) return;
-    if (!user && !(isDemoMode && !process.env.NEXT_PUBLIC_SUPABASE_URL)) return;
-    if (usage && (usage.dailyRemaining <= 0 || usage.monthlyRemaining <= 0)) return;
-
-    const generationKey = JSON.stringify({
-      jewelryType: designProfile.jewelryType,
-      occasion: designProfile.occasion,
-      recipient: designProfile.recipient,
-      style: designProfile.style,
-      metal: designProfile.metal,
-      diamondShape: designProfile.diamondShape,
-      setting: designProfile.setting,
-      bandStyle: designProfile.bandStyle,
-      budgetRange: designProfile.budgetRange,
-      notes: designProfile.notes
-    });
-    if (autoGenerationKeyRef.current === generationKey) return;
-
-    autoGenerationKeyRef.current = generationKey;
-    void generateConcepts();
-  }, [designProfile, generatedConcepts, isGenerating, isSending, sessionLoaded, usage, user]);
 
   useEffect(() => {
     if (!sessionLoaded) return;
@@ -395,38 +372,22 @@ export default function ChatPage() {
     setError("");
     setIsSending(true);
 
-    const sourceConcept = activeConcept ?? sortedConcepts[sortedConcepts.length - 1] ?? null;
-    const shouldEditSource = Boolean(sourceConcept && isImageEditRequest(trimmed));
-    const shouldCreateImage = isImageCreationRequest(trimmed);
-
     try {
-      if (shouldEditSource && sourceConcept) {
-        setIsSending(false);
-        await editConceptFromChat(sourceConcept, trimmed);
-        return;
-      }
-
-      if (shouldCreateImage) {
-        const latestEditInstruction = sourceConcept ? latestImageEditInstruction(nextMessages) : "";
-        if (sourceConcept && latestEditInstruction) {
-          setIsSending(false);
-          await editConceptFromChat(sourceConcept, latestEditInstruction);
-          return;
-        }
-
-        setIsSending(false);
-        await generateConcepts({ forceReady: true });
-        return;
-      }
-
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json", ...(await authHeaders()) },
-        body: JSON.stringify({ messages: nextMessages, designProfile, sessionId })
+        body: JSON.stringify({
+          messages: nextMessages,
+          designProfile,
+          sessionId,
+          selectedConceptId,
+          images: buildChatImageContext(sortedConcepts, selectedConceptId)
+        })
       });
       const payload = (await response.json()) as Partial<ChatApiResponse> & { error?: string };
       if (!response.ok) throw new Error(payload.error ?? "The consultant could not respond. Please try again.");
 
+      const updatedProfile = normalizeDesignProfile(payload.updatedDesignProfile);
       setMessages((current) => [
         ...current,
         {
@@ -436,19 +397,46 @@ export default function ChatPage() {
           createdAt: new Date().toISOString()
         }
       ]);
-      setDesignProfile(normalizeDesignProfile(payload.updatedDesignProfile));
+      setDesignProfile(updatedProfile);
       setStage(payload.stage ?? "discovery");
       setSuggestedActions(cleanClientSuggestions(payload.suggestedActions));
-
-      const updatedProfile = normalizeDesignProfile(payload.updatedDesignProfile);
-      if (updatedProfile.readyForGeneration && isImageCreationRequest(payload.assistantMessage ?? "")) {
-        await generateConcepts({ profileOverride: updatedProfile });
-      }
+      setIsSending(false);
+      await runChatAction(payload.action ?? { type: "chat" }, updatedProfile);
     } catch (sendError) {
       setError(sendError instanceof Error ? sendError.message : "Something went wrong. Please try again.");
     } finally {
       setIsSending(false);
     }
+  }
+
+  async function runChatAction(action: ChatAction, updatedProfile: DesignProfile) {
+    if (action.type === "generate_image") {
+      await generateConcepts({ forceReady: true, profileOverride: updatedProfile });
+      return;
+    }
+
+    if (action.type === "edit_image") {
+      const sourceConcept = resolveActionTargetConcept(action.targetImageId);
+      if (!sourceConcept) {
+        setError("Select or upload a reference image first, then tell me the edit you want.");
+        return;
+      }
+
+      await editConceptFromChat(sourceConcept, action.editInstruction, { profileOverride: updatedProfile });
+    }
+  }
+
+  function resolveActionTargetConcept(targetImageId?: string) {
+    if (targetImageId && targetImageId !== "selected" && targetImageId !== "latest") {
+      const exactConcept = sortedConcepts.find((concept) => concept.id === targetImageId);
+      if (exactConcept) return exactConcept;
+    }
+
+    if (targetImageId === "latest") {
+      return latestEditableConcept(sortedConcepts);
+    }
+
+    return activeConcept ?? latestUserProvidedConcept(sortedConcepts) ?? latestEditableConcept(sortedConcepts);
   }
 
   async function generateConcepts(options?: { forceReady?: boolean; profileOverride?: DesignProfile }) {
@@ -503,7 +491,11 @@ export default function ChatPage() {
     await editConceptFromChat(selectedConcept, instruction, { closeDialog: true });
   }
 
-  async function editConceptFromChat(sourceConcept: GeneratedConcept, instruction: string, options?: { closeDialog?: boolean }) {
+  async function editConceptFromChat(
+    sourceConcept: GeneratedConcept,
+    instruction: string,
+    options?: { closeDialog?: boolean; profileOverride?: DesignProfile }
+  ) {
     if (!user && !(isDemoMode && !process.env.NEXT_PUBLIC_SUPABASE_URL)) {
       setError("Sign in to save your designs and generate AI concepts.");
       return;
@@ -523,7 +515,7 @@ export default function ChatPage() {
         body: JSON.stringify({
           imageUrl: sourceConcept.url,
           editInstruction: instruction,
-          designProfile,
+          designProfile: options?.profileOverride ?? designProfile,
           sourceImageId: sourceConcept.id,
           sourceVersion: sourceConcept.version,
           rootId: sourceConcept.rootId,
@@ -755,6 +747,7 @@ export default function ChatPage() {
             input={input}
             isSending={isSending}
             isGenerating={isGenerating}
+            isEditing={isEditing}
             suggestions={suggestedActions}
             concepts={sortedConcepts}
             activeConceptId={activeConcept?.id ?? ""}
@@ -930,6 +923,7 @@ function ConversationPanel({
   input,
   isSending,
   isGenerating,
+  isEditing,
   suggestions,
   concepts,
   activeConceptId,
@@ -963,6 +957,7 @@ function ConversationPanel({
   input: string;
   isSending: boolean;
   isGenerating: boolean;
+  isEditing: boolean;
   suggestions: string[];
   concepts: GeneratedConcept[];
   activeConceptId: string;
@@ -1105,7 +1100,7 @@ function ConversationPanel({
               ))}
             </AnimatePresence>
             {isSending ? <TypingIndicator /> : null}
-            {isGenerating ? <ImageGeneratingBubble /> : null}
+            {isGenerating || isEditing ? <ImageGeneratingBubble label={isEditing ? "Editing the selected image..." : "Creating one diamond image..."} /> : null}
             <div ref={scrollRef} />
           </div>
 
@@ -1321,7 +1316,7 @@ function TypingIndicator() {
   );
 }
 
-function ImageGeneratingBubble() {
+function ImageGeneratingBubble({ label }: { label: string }) {
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex gap-4">
       <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-diamond-champagne shadow-[inset_0_0_0_1px_rgba(215,196,154,0.24),0_12px_30px_rgba(0,0,0,0.28)]">
@@ -1329,7 +1324,7 @@ function ImageGeneratingBubble() {
       </div>
       <div className="w-full max-w-[17rem] rounded-[1.2rem] bg-black/35 p-1 shadow-[inset_0_0_0_1px_rgba(215,196,154,0.08)] sm:max-w-xs md:max-w-sm">
         <LoadingSkeleton className="aspect-[4/5] rounded-[1rem]" />
-        <p className="px-3 py-3 text-sm text-muted-foreground">Creating one diamond image...</p>
+        <p className="px-3 py-3 text-sm text-muted-foreground">{label}</p>
       </div>
     </motion.div>
   );
@@ -2227,27 +2222,25 @@ function isUserProvidedConcept(concept: GeneratedConcept) {
   );
 }
 
-function isImageCreationRequest(value: string) {
-  const normalized = value.toLowerCase();
-  return /\b(create|generate|make|render|show|produce)\b.*\b(image|concept|design|picture|visual|it)\b/.test(normalized) ||
-    /\b(create|generate|render|produce)\s+(it|this|now)\b/.test(normalized) ||
-    normalized.includes("then create it");
+function latestUserProvidedConcept(concepts: GeneratedConcept[]) {
+  return [...concepts].reverse().find((concept) => isUserProvidedConcept(concept)) ?? null;
 }
 
-function isImageEditRequest(value: string) {
-  const normalized = value.toLowerCase();
-  if (isImageCreationRequest(normalized) && !/(change|edit|modify|turn|make it|yellow|white|rose|gold|platinum|silver|thinner|thicker|halo|band|stone|diamond|metal|color|colour)/.test(normalized)) {
-    return false;
-  }
-
-  return /(change|edit|modify|turn|replace|keep|preserve|same|make it|make the|yellow|white|rose|gold|platinum|silver|metal|color|colour|thinner|thicker|halo|band|stone|diamond|remove|add)/.test(normalized);
+function latestEditableConcept(concepts: GeneratedConcept[]) {
+  return [...concepts].reverse().find(Boolean) ?? null;
 }
 
-function latestImageEditInstruction(messages: ChatMessage[]) {
-  return [...messages]
-    .reverse()
-    .find((message) => message.role === "user" && isImageEditRequest(message.content) && !isImageCreationRequest(message.content))
-    ?.content.trim() ?? "";
+function buildChatImageContext(concepts: GeneratedConcept[], selectedConceptId: string): ChatImageContext[] {
+  const latestConceptId = concepts[concepts.length - 1]?.id ?? "";
+
+  return concepts.slice(-12).map((concept) => ({
+    id: concept.id,
+    variationName: concept.variationName,
+    description: concept.description,
+    isUserProvided: isUserProvidedConcept(concept),
+    isSelected: concept.id === selectedConceptId,
+    isLatest: concept.id === latestConceptId
+  }));
 }
 
 function cleanClientSuggestions(actions: unknown): string[] {
