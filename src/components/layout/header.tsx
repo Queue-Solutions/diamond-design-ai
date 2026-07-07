@@ -1,16 +1,41 @@
 "use client";
 
 import Link from "next/link";
+import { useEffect, useState } from "react";
 import { Gem, Menu, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { navigationItems } from "@/config/navigation";
 import { AuthButton } from "@/components/auth/auth-button";
+import { useAuth } from "@/components/auth/auth-provider";
 import { useLanguage } from "@/lib/language";
 import { diamondSessionStorageKey } from "@/lib/session-store";
 
 export function Header() {
   const { isArabic, toggleLanguage, t } = useLanguage();
+  const { supabase, user } = useAuth();
+  const [isAdmin, setIsAdmin] = useState(false);
+
+  useEffect(() => {
+    if (!supabase || !user) {
+      setIsAdmin(false);
+      return;
+    }
+
+    let mounted = true;
+    void supabase
+      .from("profiles")
+      .select("role")
+      .eq("id", user.id)
+      .maybeSingle<{ role: "customer" | "admin" }>()
+      .then(({ data }) => {
+        if (mounted) setIsAdmin(data?.role === "admin");
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, [supabase, user]);
 
   function startNewDesign() {
     window.localStorage.removeItem(diamondSessionStorageKey);
@@ -61,6 +86,11 @@ export function Header() {
           <Button asChild variant="secondary" className="hidden sm:inline-flex">
             <Link href="/gallery">{t("View Gallery", "عرض التصاميم")}</Link>
           </Button>
+          {isAdmin ? (
+            <Button asChild variant="secondary" className="hidden sm:inline-flex">
+              <Link href="/admin">{t("Admin Dashboard", "Admin Dashboard")}</Link>
+            </Button>
+          ) : null}
           <Button className="hidden sm:inline-flex" onClick={startNewDesign}>
             {t("New Design", "تصميم جديد")}
           </Button>

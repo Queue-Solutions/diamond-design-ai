@@ -7,7 +7,7 @@ import Link from "next/link";
 import { Download, Gem, Heart, Image as ImageIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardFooter } from "@/components/ui/card";
-import { loadDiamondSession, type PersistedDiamondSession } from "@/lib/session-store";
+import { loadDiamondSession, saveDiamondSession, type PersistedDiamondSession } from "@/lib/session-store";
 import type { GeneratedConcept } from "@/types/design";
 import { useLanguage } from "@/lib/language";
 
@@ -30,6 +30,18 @@ export default function GalleryPage() {
   const favoriteIds = new Set(session?.favoriteIds ?? []);
   const savedConcepts = concepts.filter((concept) => favoriteIds.has(concept.id));
 
+  function toggleFavorite(id: string) {
+    setSession((current) => {
+      if (!current) return current;
+      const nextFavoriteIds = new Set(current.favoriteIds);
+      if (nextFavoriteIds.has(id)) nextFavoriteIds.delete(id);
+      else nextFavoriteIds.add(id);
+      const nextSession = { ...current, favoriteIds: Array.from(nextFavoriteIds) };
+      saveDiamondSession(nextSession);
+      return nextSession;
+    });
+  }
+
   return (
     <div className="space-y-8">
       <section className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
@@ -50,6 +62,7 @@ export default function GalleryPage() {
               concept={concept}
               favorite={favoriteIds.has(concept.id)}
               finalized={session?.finalizedConceptId === concept.id}
+              onToggleFavorite={toggleFavorite}
               finalLabel={t("Final Design", "التصميم النهائي")}
               originalLabel={t("Original concept", "التصور الأصلي")}
               refinementLabel={t("refinement", "تنقيح")}
@@ -83,6 +96,7 @@ function GalleryConceptCard({
   concept,
   favorite,
   finalized,
+  onToggleFavorite,
   finalLabel,
   originalLabel,
   refinementLabel
@@ -90,6 +104,7 @@ function GalleryConceptCard({
   concept: GeneratedConcept;
   favorite: boolean;
   finalized: boolean;
+  onToggleFavorite: (id: string) => void;
   finalLabel: string;
   originalLabel: string;
   refinementLabel: string;
@@ -99,9 +114,6 @@ function GalleryConceptCard({
       <CardContent className="p-3">
         <div className="relative aspect-[4/5] overflow-hidden rounded-[1.35rem] bg-black">
           <img src={concept.url} alt={concept.variationName} className="h-full w-full object-cover transition duration-300 group-hover:scale-[1.015]" />
-          <div className="absolute left-3 top-3 rounded-full bg-black/60 px-3 py-1 text-xs text-white shadow-[inset_0_0_0_1px_rgba(215,196,154,0.14)] backdrop-blur">
-            V{concept.version}
-          </div>
           {finalized ? (
             <div className="absolute right-3 top-3 rounded-full bg-diamond-champagne/20 px-3 py-1 text-xs text-white shadow-[inset_0_0_0_1px_rgba(215,196,154,0.18)] backdrop-blur">
               {finalLabel}
@@ -112,26 +124,75 @@ function GalleryConceptCard({
       <CardFooter className="flex items-center justify-between gap-4 px-5 pb-5 pt-1">
         <div className="min-w-0">
           <p className="font-display truncate text-xl font-medium text-white">{concept.variationName}</p>
-          <p className="text-sm text-muted-foreground">
-            {concept.parentId ? `V${concept.version} ${refinementLabel}` : originalLabel}
-          </p>
+          <p className="text-sm text-muted-foreground">{concept.parentId ? refinementLabel : originalLabel}</p>
         </div>
         <div className="flex gap-2">
-          <Button size="icon" variant="ghost" aria-label="Favorite design">
+          <Button size="icon" variant="ghost" aria-label={favorite ? "Unlike design" : "Favorite design"} onClick={() => onToggleFavorite(concept.id)}>
             {favorite ? <Heart className="h-4 w-4 fill-diamond-champagne text-diamond-champagne" /> : <Heart className="h-4 w-4" />}
           </Button>
-          <Button size="icon" variant="ghost" aria-label="Download design" asChild>
-            <a href={concept.url} download={`diamond-concept-v${concept.version}.webp`}>
-              <Download className="h-4 w-4" />
-            </a>
+          <Button size="icon" variant="ghost" aria-label="Download design" onClick={() => void downloadConceptAsPng(concept)}>
+            <Download className="h-4 w-4" />
           </Button>
           <Button size="icon" variant="ghost" aria-label="Open workspace" asChild>
-            <Link href="/chat">
+            <Link href={`/chat?inspiration=${encodeURIComponent(concept.url)}&title=${encodeURIComponent(concept.variationName)}`}>
               <Gem className="h-4 w-4" />
             </Link>
           </Button>
         </div>
       </CardFooter>
     </Card>
+  );
+}
+
+async function downloadConceptAsPng(concept: GeneratedConcept) {
+  const response = await fetch(concept.url);
+  if (!response.ok) return;
+
+  const blob = await response.blob();
+  const imageUrl = URL.createObjectURL(blob);
+
+  try {
+    const image = await loadImage(imageUrl);
+    const canvas = document.createElement("canvas");
+    canvas.width = image.naturalWidth || image.width;
+    canvas.height = image.naturalHeight || image.height;
+    const context = canvas.getContext("2d");
+    if (!context) throw new Error("Canvas export unavailable.");
+
+    context.drawImage(image, 0, 0);
+    const pngBlob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));
+    triggerDownload(pngBlob ?? blob, `${safeFileName(concept.variationName || "diamond-design")}.png`);
+  } finally {
+    URL.revokeObjectURL(imageUrl);
+  }
+}
+
+function loadImage(url: string) {
+  return new Promise<HTMLImageElement>((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = reject;
+    image.src = url;
+  });
+}
+
+function triggerDownload(blob: Blob, fileName: string) {
+  const objectUrl = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = objectUrl;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(objectUrl);
+}
+
+function safeFileName(value: string) {
+  return (
+    value
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/(^-|-$)/g, "")
+      .slice(0, 48) || "diamond-design"
   );
 }

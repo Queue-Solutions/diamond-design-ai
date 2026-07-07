@@ -126,6 +126,7 @@ export default function ChatPage() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const imageRefreshInFlightRef = useRef(false);
   const inspirationLoadedRef = useRef(false);
+  const autoGenerationKeyRef = useRef("");
   const storage = useMemo(() => new BrowserLocalImageStorage(), []);
 
   const sortedConcepts = useMemo(
@@ -199,6 +200,30 @@ export default function ChatPage() {
 
     void refreshUsage();
   }, [user]);
+
+  useEffect(() => {
+    const hasAssistantGeneratedImage = generatedConcepts.some((concept) => !isUserProvidedConcept(concept));
+    if (!sessionLoaded || !designProfile.readyForGeneration || isGenerating || isSending || hasAssistantGeneratedImage) return;
+    if (!user && !(isDemoMode && !process.env.NEXT_PUBLIC_SUPABASE_URL)) return;
+    if (usage && (usage.dailyRemaining <= 0 || usage.monthlyRemaining <= 0)) return;
+
+    const generationKey = JSON.stringify({
+      jewelryType: designProfile.jewelryType,
+      occasion: designProfile.occasion,
+      recipient: designProfile.recipient,
+      style: designProfile.style,
+      metal: designProfile.metal,
+      diamondShape: designProfile.diamondShape,
+      setting: designProfile.setting,
+      bandStyle: designProfile.bandStyle,
+      budgetRange: designProfile.budgetRange,
+      notes: designProfile.notes
+    });
+    if (autoGenerationKeyRef.current === generationKey) return;
+
+    autoGenerationKeyRef.current = generationKey;
+    void generateConcepts();
+  }, [designProfile, generatedConcepts, isGenerating, isSending, sessionLoaded, usage, user]);
 
   useEffect(() => {
     if (!sessionLoaded) return;
@@ -683,7 +708,7 @@ export default function ChatPage() {
 
       {error ? <LuxuryAlert message={error} onRetry={() => setError("")} /> : null}
 
-      <div className="relative min-w-0">
+      <div className="relative grid min-w-0 gap-6 xl:grid-cols-[minmax(0,1fr)_23rem]">
         <div className="min-w-0 space-y-6">
           <ConversationPanel
             messages={messages}
@@ -723,6 +748,55 @@ export default function ChatPage() {
             scrollRef={scrollRef}
           />
         </div>
+
+        <StudioPanel
+          profile={designProfile}
+          visibleProfile={visibleProfile}
+          concepts={sortedConcepts}
+          activeConceptId={activeConcept?.id ?? ""}
+          activeConcept={activeConcept}
+          finalizedConcept={finalizedConcept}
+          designBrief={designBrief}
+          referenceId={referenceId}
+          isGenerating={isGenerating}
+          isGeneratingBrief={isGeneratingBrief}
+          usage={usage}
+          isSignedIn={Boolean(user)}
+          onGenerate={() => void generateConcepts()}
+          onUpload={() => setUploadOpen(true)}
+          onSelect={setSelectedConceptId}
+          onPrepareBrief={(concept) => setFinalizeCandidate(concept)}
+          onCopySummary={async () => {
+            if (!designBrief || !finalizedConcept) return;
+            try {
+              await navigator.clipboard.writeText(createBriefText(designBrief, finalizedConcept));
+            } catch {
+              setError("Copy failed. Your browser may require clipboard permission.");
+            }
+          }}
+          onCopyReference={async () => {
+            try {
+              if (referenceId) await navigator.clipboard.writeText(referenceId);
+            } catch {
+              setError("Copy failed. Your browser may require clipboard permission.");
+            }
+          }}
+          onDownloadPdf={() => {
+            if (designBrief && finalizedConcept) {
+              void downloadDesignPdf({ concept: finalizedConcept, brief: designBrief, profile: designProfile }).catch(() =>
+                setError("PDF export could not be completed. Try the print option as a fallback.")
+              );
+            }
+          }}
+          onDownloadPng={() => {
+            if (designBrief && finalizedConcept) {
+              void downloadWorkshopPng({ concept: finalizedConcept, brief: designBrief, profile: designProfile }).catch(() =>
+                setError("PNG export could not be completed. The source image may block browser export.")
+              );
+            }
+          }}
+          onPrint={() => window.print()}
+        />
       </div>
 
       <EditConceptDialog
@@ -880,6 +954,14 @@ function ConversationPanel({
 }) {
   const lastAssistantId = [...messages].reverse().find((message) => message.role === "assistant")?.id;
   const aiDisabled = !isSignedIn || Boolean(usage && (usage.dailyRemaining <= 0 || usage.monthlyRemaining <= 0));
+  const timeline = useMemo(
+    () =>
+      [
+        ...messages.map((message) => ({ id: message.id, createdAt: message.createdAt, type: "message" as const, message })),
+        ...concepts.map((concept) => ({ id: concept.id, createdAt: concept.createdAt, type: "concept" as const, concept }))
+      ].sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()),
+    [concepts, messages]
+  );
   const { t } = useLanguage();
   const stageText = t(
     statusLabel(stage),
@@ -964,32 +1046,26 @@ function ConversationPanel({
 
           <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-5 overflow-y-auto rounded-[1.4rem] bg-[#070707]/62 p-3 shadow-[inset_0_0_0_1px_rgba(215,196,154,0.07),inset_0_1px_20px_rgba(255,255,255,0.015)] sm:p-5">
             <AnimatePresence initial={false}>
-              {messages.map((message) => (
-                <ChatBubble key={message.id} message={message} stream={message.id === lastAssistantId} />
+              {timeline.map((item) => (
+                item.type === "message" ? (
+                  <ChatBubble key={item.id} message={item.message} stream={item.message.id === lastAssistantId} />
+                ) : (
+                  <ChatImageBubble
+                    key={item.id}
+                    concept={item.concept}
+                    side={isUserProvidedConcept(item.concept) ? "user" : "assistant"}
+                    active={item.concept.id === activeConceptId}
+                    favorite={favoriteIds.has(item.concept.id)}
+                    onSelect={onSelect}
+                    onPreview={onPreview}
+                    onFavorite={onFavorite}
+                    onImageError={onImageError}
+                  />
+                )
               ))}
             </AnimatePresence>
             {isSending ? <TypingIndicator /> : null}
-            <ChatImageStudies
-              concepts={concepts}
-              activeConceptId={activeConceptId}
-              favoriteIds={favoriteIds}
-              comparisonIds={comparisonIds}
-              finalizedConceptId={finalizedConceptId}
-              revisionUnlockedIds={revisionUnlockedIds}
-              isGenerating={isGenerating}
-              readyForGeneration={readyForGeneration}
-              aiDisabled={aiDisabled}
-              onSelect={onSelect}
-              onGenerate={onGenerate}
-              onUpload={onUpload}
-              onEdit={onEdit}
-              onFinalize={onFinalize}
-              onCreateRevision={onCreateRevision}
-              onPreview={onPreview}
-              onFavorite={onFavorite}
-              onCompare={onCompareImage}
-              onImageError={onImageError}
-            />
+            {isGenerating ? <ImageGeneratingBubble /> : null}
             <div ref={scrollRef} />
           </div>
 
@@ -1070,6 +1146,79 @@ const ChatBubble = memo(function ChatBubble({ message, stream }: { message: Chat
   );
 });
 
+function ChatImageBubble({
+  concept,
+  side,
+  active,
+  favorite,
+  onSelect,
+  onPreview,
+  onFavorite,
+  onImageError
+}: {
+  concept: GeneratedConcept;
+  side: "assistant" | "user";
+  active: boolean;
+  favorite: boolean;
+  onSelect: (id: string) => void;
+  onPreview: (concept: GeneratedConcept) => void;
+  onFavorite: (id: string) => void;
+  onImageError: () => void;
+}) {
+  const isAssistant = side === "assistant";
+
+  return (
+    <motion.div
+      layout
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: -8 }}
+      className={cn("flex min-w-0 gap-3 sm:gap-4", isAssistant ? "justify-start" : "justify-end")}
+    >
+      {isAssistant ? (
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-diamond-champagne shadow-[inset_0_0_0_1px_rgba(215,196,154,0.24),0_12px_30px_rgba(0,0,0,0.28)]">
+          <Gem className="h-5 w-5" />
+        </div>
+      ) : null}
+      <div
+        className={cn(
+          "group relative w-full max-w-[17rem] overflow-hidden rounded-[1.2rem] p-1 shadow-[inset_0_0_0_1px_rgba(215,196,154,0.08)] sm:max-w-xs md:max-w-sm",
+          isAssistant ? "bg-black/35" : "bg-diamond-champagne/[0.09]",
+          active && "shadow-[inset_0_0_0_1px_rgba(215,196,154,0.32),0_18px_55px_rgba(0,0,0,0.26)]"
+        )}
+      >
+        <button
+          type="button"
+          className="block aspect-[4/5] w-full overflow-hidden rounded-[1rem] text-left focus-visible:outline-none focus-visible:shadow-[inset_0_0_0_3px_rgba(215,196,154,0.18)]"
+          onClick={() => {
+            onSelect(concept.id);
+            onPreview(concept);
+          }}
+        >
+          <img
+            src={concept.url}
+            alt={concept.variationName}
+            loading="lazy"
+            onError={onImageError}
+            className="h-full w-full object-cover transition duration-500 group-hover:scale-[1.03]"
+          />
+        </button>
+        <button
+          type="button"
+          aria-label={favorite ? "Unlike concept" : "Favorite concept"}
+          onClick={() => onFavorite(concept.id)}
+          className={cn(
+            "absolute right-3 top-3 flex h-9 w-9 items-center justify-center rounded-full border bg-black/60 text-white backdrop-blur transition hover:bg-white/15",
+            favorite && "border-diamond-champagne text-diamond-champagne"
+          )}
+        >
+          <Heart className={cn("h-4 w-4", favorite && "fill-diamond-champagne")} />
+        </button>
+      </div>
+    </motion.div>
+  );
+}
+
 function StreamingMessage({ content }: { content: string }) {
   const [visibleLength, setVisibleLength] = useState(0);
 
@@ -1127,6 +1276,20 @@ function TypingIndicator() {
         <p className="mb-3 text-sm text-muted-foreground">Crafting inspiration...</p>
         <LoadingSkeleton className="mb-3 h-4 w-2/3" />
         <LoadingSkeleton className="h-4 w-1/2" />
+      </div>
+    </motion.div>
+  );
+}
+
+function ImageGeneratingBubble() {
+  return (
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex gap-4">
+      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-diamond-champagne shadow-[inset_0_0_0_1px_rgba(215,196,154,0.24),0_12px_30px_rgba(0,0,0,0.28)]">
+        <Sparkles className="h-5 w-5 animate-pulse" />
+      </div>
+      <div className="w-full max-w-[17rem] rounded-[1.2rem] bg-black/35 p-1 shadow-[inset_0_0_0_1px_rgba(215,196,154,0.08)] sm:max-w-xs md:max-w-sm">
+        <LoadingSkeleton className="aspect-[4/5] rounded-[1rem]" />
+        <p className="px-3 py-3 text-sm text-muted-foreground">Creating one diamond image...</p>
       </div>
     </motion.div>
   );
@@ -1262,14 +1425,14 @@ function ChatImageStudies({
         ) : (
           <div className="rounded-2xl bg-white/[0.025] p-5 text-sm leading-6 text-muted-foreground shadow-[inset_0_0_0_1px_rgba(215,196,154,0.08)]">
             {t(
-              "Continue the consultation until the direction is ready, or upload a reference image to begin visually.",
+              "Continue the consultation until the direction is ready.",
               "استمر في الاستشارة حتى يصبح الاتجاه واضحاً، أو ارفع صورة مرجعية للبدء بصرياً."
             )}
           </div>
         )}
 
         {!concepts.length ? (
-          <Button className="mt-3" variant="secondary" onClick={onUpload}>
+          <Button className="hidden" variant="secondary" onClick={onUpload}>
             <Upload className="h-4 w-4" />
             {t("Add Reference Image", "إضافة صورة مرجعية")}
           </Button>
@@ -1306,11 +1469,10 @@ function IconButton({
 
 function StudioPanel({
   profile,
-  stage,
-  completion,
   visibleProfile,
   concepts,
   activeConceptId,
+  activeConcept,
   isGenerating,
   isGeneratingBrief,
   finalizedConcept,
@@ -1321,6 +1483,7 @@ function StudioPanel({
   onGenerate,
   onUpload,
   onSelect,
+  onPrepareBrief,
   onCopySummary,
   onCopyReference,
   onDownloadPdf,
@@ -1328,11 +1491,10 @@ function StudioPanel({
   onPrint
 }: {
   profile: DesignProfile;
-  stage: ConversationStage;
-  completion: number;
   visibleProfile: Array<{ key: keyof Omit<DesignProfile, "readyForGeneration">; label: string; section: string; value: string }>;
   concepts: GeneratedConcept[];
   activeConceptId: string;
+  activeConcept: GeneratedConcept | null;
   isGenerating: boolean;
   isGeneratingBrief: boolean;
   finalizedConcept: GeneratedConcept | null;
@@ -1340,10 +1502,10 @@ function StudioPanel({
   referenceId: string;
   usage: UsageState | null;
   isSignedIn: boolean;
-  onImageError: () => void;
   onGenerate: () => void;
   onUpload: () => void;
   onSelect: (id: string) => void;
+  onPrepareBrief: (concept: GeneratedConcept) => void;
   onCopySummary: () => void;
   onCopyReference: () => void;
   onDownloadPdf: () => void;
@@ -1367,16 +1529,11 @@ function StudioPanel({
               <p className="text-xs uppercase tracking-[0.24em] text-diamond-champagne/70">{t("Private consultation", "استشارة خاصة")}</p>
               <CardTitle className="mt-1">{t("Design Profile", "ملف التصميم")}</CardTitle>
             </div>
-            <div className="flex h-14 w-14 items-center justify-center rounded-full border border-diamond-champagne/25 bg-black/30 text-sm font-semibold text-diamond-champagne">
-              {completion}%
-            </div>
           </div>
         </CardHeader>
         <CardContent className="space-y-5">
-          <ProgressBar value={completion} />
-          <StageTracker stage={stage} ready={profile.readyForGeneration} />
           {visibleProfile.length ? <ProfileSummary items={visibleProfile} /> : <ElegantEmptyState title={t("Profile forming", "جاري تكوين الملف")} description={t("The atelier will shape jewelry, stone, setting, style, and occasion details as you talk.", "سيشكل الأتيليه نوع المجوهرات والحجر والترصيع والأسلوب والمناسبة أثناء المحادثة.")} compact />}
-          <Button className="w-full" disabled={!profile.readyForGeneration || isGenerating || Boolean(disabledReason)} onClick={onGenerate}>
+          <Button className="hidden" disabled={!profile.readyForGeneration || isGenerating || Boolean(disabledReason)} onClick={onGenerate}>
             {isGenerating ? <Sparkles className="h-4 w-4 animate-pulse" /> : <Wand2 className="h-4 w-4" />}
             {t("Present Diamond Study", "عرض دراسة ألماس")}
           </Button>
@@ -1387,7 +1544,7 @@ function StudioPanel({
               <p>{usage.monthlyRemaining} / {usage.monthlyLimit} monthly image credits remaining</p>
             </div>
           ) : null}
-          <Button className="w-full" variant="secondary" onClick={onUpload}>
+          <Button className="hidden" variant="secondary" onClick={onUpload}>
             <Upload className="h-4 w-4" />
             {t("Add Reference Image", "إضافة صورة مرجعية")}
           </Button>
@@ -1413,13 +1570,21 @@ function StudioPanel({
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
+          {!finalizedConcept && activeConcept ? (
+            <div className="space-y-3 rounded-2xl bg-black/25 p-4 ring-1 ring-diamond-champagne/10">
+              <p className="text-xs uppercase tracking-[0.18em] text-diamond-champagne/70">{t("Current image", "Current image")}</p>
+              <p className="text-sm font-medium text-white">{activeConcept.variationName}</p>
+              <Button className="w-full" size="sm" onClick={() => onPrepareBrief(activeConcept)} disabled={isGeneratingBrief}>
+                {isGeneratingBrief ? <Sparkles className="h-4 w-4 animate-pulse" /> : <Check className="h-4 w-4" />}
+                {t("Prepare Brief", "Prepare Brief")}
+              </Button>
+            </div>
+          ) : null}
           {finalizedConcept ? (
             <>
               <div className="rounded-2xl bg-diamond-champagne/10 p-4 ring-1 ring-diamond-champagne/20">
                 <p className="font-medium text-white">{t("Final Direction Chosen", "تم اختيار الاتجاه النهائي")}</p>
-                <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                  V{finalizedConcept.version} - {finalizedConcept.variationName}
-                </p>
+                <p className="mt-2 text-sm leading-6 text-muted-foreground">{finalizedConcept.variationName}</p>
                 <p className="mt-2 text-xs text-diamond-champagne">{referenceId}</p>
               </div>
               {isGeneratingBrief ? (
@@ -1466,7 +1631,7 @@ function StudioPanel({
         </CardContent>
       </Card>
 
-      <Card>
+      <Card className="hidden">
         <CardHeader>
           <CardTitle>{t("Design Lineage", "تسلسل التصميم")}</CardTitle>
         </CardHeader>
@@ -2010,6 +2175,16 @@ function safeFileName(value: string) {
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/(^-|-$)/g, "")
     .slice(0, 48) || "diamond-design";
+}
+
+function isUserProvidedConcept(concept: GeneratedConcept) {
+  const label = `${concept.variationName} ${concept.description}`.toLowerCase();
+  return (
+    !concept.prompt.trim() &&
+    (label.includes("uploaded reference") ||
+      label.includes("customer uploaded reference") ||
+      label.includes("reference selected from the inspiration library"))
+  );
 }
 
 function cleanClientSuggestions(actions: unknown): string[] {
