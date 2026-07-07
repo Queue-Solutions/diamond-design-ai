@@ -9,7 +9,7 @@ import { navigationItems } from "@/config/navigation";
 import { AuthButton } from "@/components/auth/auth-button";
 import { useAuth } from "@/components/auth/auth-provider";
 import { useLanguage } from "@/lib/language";
-import { diamondSessionStorageKey } from "@/lib/session-store";
+import { clearDiamondSession } from "@/lib/session-store";
 
 export function Header() {
   const { isArabic, toggleLanguage, t } = useLanguage();
@@ -38,7 +38,7 @@ export function Header() {
   }, [supabase, user]);
 
   function startNewDesign() {
-    window.localStorage.removeItem(diamondSessionStorageKey);
+    clearDiamondSession(user?.id);
     window.location.assign(`/chat?newDesign=${Date.now()}`);
   }
 
