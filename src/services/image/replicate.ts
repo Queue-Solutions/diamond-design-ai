@@ -84,7 +84,7 @@ export class ReplicateImageProvider implements ImageGenerationProvider {
           input: {
             prompt: request.prompt,
             input_image: request.imageUrl,
-            output_format: "webp",
+            output_format: "png",
             safety_tolerance: 2
           }
         }) as Promise<ReplicateOutput>,
