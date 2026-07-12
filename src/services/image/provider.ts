@@ -1,9 +1,11 @@
 import type { ChatMessage, DesignProfile } from "@/types/design";
+import type { ReplicateImageModel } from "./models";
 
 export type JewelryImagePrompt = {
   prompt: string;
   variationName: string;
   description: string;
+  model?: ReplicateImageModel;
 };
 
 export type GeneratedImage = {
@@ -41,6 +43,7 @@ export type EditDesignProviderRequest = {
   sourceVersion: number;
   rootId: string;
   variationName: string;
+  model?: ReplicateImageModel;
 };
 
 export class MissingImageApiTokenError extends Error {

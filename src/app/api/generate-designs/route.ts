@@ -4,6 +4,7 @@ import { estimatedCosts } from "@/config/costs";
 import { ApiInputError, handleApiError, methodNotAllowed, parseJsonBody } from "@/lib/api-response";
 import { createDemoConcepts } from "@/lib/demo-data";
 import { normalizeDesignProfile } from "@/lib/design-profile";
+import { requiresArabicJewelryLettering } from "@/lib/personalization";
 import { requireRateLimit } from "@/lib/rate-limit";
 import {
   getOrCreateDesignSession,
@@ -20,7 +21,8 @@ import {
   ImageGenerationError,
   MissingImageApiTokenError,
   ReplicateImageProvider,
-  buildDiamondConceptPrompts
+  buildDiamondConceptPrompts,
+  imageModels
 } from "@/services/image";
 import type { ChatMessage, DesignProfile } from "@/types/design";
 
@@ -58,15 +60,25 @@ export async function POST(request: Request) {
       designProfile
     });
 
-    const prompts = buildDiamondConceptPrompts(designProfile);
+    const selectedModel = requiresArabicJewelryLettering(designProfile)
+      ? imageModels.krea2Medium
+      : imageModels.flux2ProGeneration;
+    const prompts = buildDiamondConceptPrompts(designProfile).map((prompt) => ({
+      ...prompt,
+      model: selectedModel
+    }));
+    const estimatedCost =
+      selectedModel === imageModels.krea2Medium
+        ? estimatedCosts.replicateKrea2MediumImage
+        : estimatedCosts.replicateFlux2ProGeneration;
     const reservation = await reserveImageCredit({
       userId: auth.user.id,
       sessionId,
       eventType: "image_generation",
       provider: "replicate",
-      model: "black-forest-labs/flux-2-pro",
-      estimatedCost: estimatedCosts.replicateFlux2ProGeneration,
-      metadata: { promptCount: prompts.length }
+      model: selectedModel,
+      estimatedCost,
+      metadata: { promptCount: prompts.length, routing: selectedModel === imageModels.krea2Medium ? "arabic_lettering" : "default" }
     });
     const startedAt = Date.now();
     const savedImages = [];
@@ -92,7 +104,7 @@ export async function POST(request: Request) {
           concept: { ...normalizedImage, url: stored.signedUrl },
           type: "generated",
           provider: "replicate",
-          model: "black-forest-labs/flux-2-pro",
+          model: selectedModel,
           storagePath: stored.storagePath
         });
 
@@ -100,7 +112,7 @@ export async function POST(request: Request) {
           usageEventId: reservation.usageEventId,
           designImageId: record.id,
           latencyMs: Date.now() - startedAt,
-          metadata: { promptCount: prompts.length, storagePath: stored.storagePath }
+          metadata: { promptCount: prompts.length, storagePath: stored.storagePath, model: selectedModel }
         });
 
         savedImages.push(await mapImageRecordToConcept(record));
@@ -111,7 +123,7 @@ export async function POST(request: Request) {
           usageEventId: reservation.usageEventId,
           latencyMs: Date.now() - startedAt,
           errorCode: error instanceof ImageGenerationError ? "IMAGE_PROVIDER_ERROR" : "IMAGE_FLOW_ERROR",
-          metadata: { promptCount: prompts.length }
+          metadata: { promptCount: prompts.length, model: selectedModel }
         });
       } catch (statusError) {
         console.error("Reserved image generation usage event could not be marked failed.", statusError);

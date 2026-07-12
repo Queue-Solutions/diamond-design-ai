@@ -14,6 +14,7 @@ A premium AI design workspace for diamond jewelry concepting, refinement, and wo
 - OpenAI GPT for consultant chat and workshop briefs
 - Replicate FLUX.2 Pro for image generation
 - Replicate FLUX Kontext Pro for image editing
+- Replicate Krea 2 Medium for Arabic lettering jewelry generation/edit routing
 - Supabase Auth, Postgres, Row Level Security, and Storage
 
 ## Setup
@@ -42,6 +43,7 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=
 SUPABASE_SERVICE_ROLE_KEY=
 ESTIMATED_COST_REPLICATE_FLUX_2_PRO_IMAGE=0.04
 ESTIMATED_COST_REPLICATE_FLUX_KONTEXT_PRO_EDIT=0.04
+ESTIMATED_COST_REPLICATE_KREA_2_MEDIUM_IMAGE=0.04
 ESTIMATED_COST_OPENAI_CHAT=0.01
 ESTIMATED_COST_OPENAI_DESIGN_BRIEF=0.02
 ```

@@ -6,5 +6,7 @@ export type {
   JewelryImagePrompt
 } from "./provider";
 export { ImageGenerationError, MissingImageApiTokenError } from "./provider";
+export { imageModels } from "./models";
+export type { ReplicateImageModel } from "./models";
 export { buildDiamondConceptPrompts, buildEditPrompt } from "./prompt-builder";
 export { ReplicateImageProvider } from "./replicate";

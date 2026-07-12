@@ -5,6 +5,7 @@ import { ApiInputError, handleApiError, methodNotAllowed, parseJsonBody } from "
 import { createDemoEditedConcept } from "@/lib/demo-data";
 import { normalizeDesignProfile } from "@/lib/design-profile";
 import { updateDesignProfileFromEdit } from "@/lib/edit-profile";
+import { requiresArabicJewelryLettering } from "@/lib/personalization";
 import { requireRateLimit } from "@/lib/rate-limit";
 import {
   getOrCreateDesignSession,
@@ -22,7 +23,8 @@ import {
   ImageGenerationError,
   MissingImageApiTokenError,
   ReplicateImageProvider,
-  buildEditPrompt
+  buildEditPrompt,
+  imageModels
 } from "@/services/image";
 import type { DesignProfile } from "@/types/design";
 
@@ -60,6 +62,9 @@ export async function POST(request: Request) {
     const designProfile = normalizeDesignProfile(body.designProfile);
     const updatedDesignProfile = updateDesignProfileFromEdit(designProfile, editInstruction);
     const variationName = body.variationName?.trim() || "Edited Concept";
+    const selectedModel = requiresArabicJewelryLettering(updatedDesignProfile)
+      ? imageModels.krea2Medium
+      : imageModels.fluxKontextProEdit;
     const prompt = buildEditPrompt({
       designProfile: updatedDesignProfile,
       editInstruction,
@@ -97,9 +102,15 @@ export async function POST(request: Request) {
       sessionId,
       eventType: "image_edit",
       provider: "replicate",
-      model: "black-forest-labs/flux-kontext-pro",
-      estimatedCost: estimatedCosts.replicateFluxKontextProEdit,
-      metadata: { sourceImageId: body.sourceImageId }
+      model: selectedModel,
+      estimatedCost:
+        selectedModel === imageModels.krea2Medium
+          ? estimatedCosts.replicateKrea2MediumImage
+          : estimatedCosts.replicateFluxKontextProEdit,
+      metadata: {
+        sourceImageId: body.sourceImageId,
+        routing: selectedModel === imageModels.krea2Medium ? "arabic_lettering" : "default"
+      }
     });
     const startedAt = Date.now();
     let record;
@@ -119,7 +130,8 @@ export async function POST(request: Request) {
         sourceImageId: body.sourceImageId,
         sourceVersion: body.sourceVersion,
         rootId: body.rootId || body.sourceImageId,
-        variationName
+        variationName,
+        model: selectedModel
       });
       const stored = await storeImageFromUrl({
         url: image.url,
@@ -133,7 +145,7 @@ export async function POST(request: Request) {
         concept: { ...image, url: stored.signedUrl },
         type: "edited",
         provider: "replicate",
-        model: "black-forest-labs/flux-kontext-pro",
+        model: selectedModel,
         storagePath: stored.storagePath
       });
 
@@ -141,7 +153,7 @@ export async function POST(request: Request) {
         usageEventId: reservation.usageEventId,
         designImageId: record.id,
         latencyMs: Date.now() - startedAt,
-        metadata: { sourceImageId: body.sourceImageId, storagePath: stored.storagePath }
+        metadata: { sourceImageId: body.sourceImageId, storagePath: stored.storagePath, model: selectedModel }
       });
     } catch (error) {
       try {
@@ -149,7 +161,7 @@ export async function POST(request: Request) {
           usageEventId: reservation.usageEventId,
           latencyMs: Date.now() - startedAt,
           errorCode: error instanceof ImageGenerationError ? "IMAGE_PROVIDER_ERROR" : "IMAGE_FLOW_ERROR",
-          metadata: { sourceImageId: body.sourceImageId }
+          metadata: { sourceImageId: body.sourceImageId, model: selectedModel }
         });
       } catch (statusError) {
         console.error("Reserved image edit usage event could not be marked failed.", statusError);

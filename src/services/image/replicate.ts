@@ -1,5 +1,6 @@
 import Replicate from "replicate";
 import { requireReplicateApiToken, serverEnv } from "@/config/env";
+import { imageModels, type ReplicateImageModel } from "./models";
 import {
   ImageGenerationError,
   MissingImageApiTokenError,
@@ -9,8 +10,6 @@ import {
   type JewelryImagePrompt
 } from "./provider";
 
-const generationModel = "black-forest-labs/flux-2-pro";
-const editModel = "black-forest-labs/flux-kontext-pro";
 const requestTimeoutMs = 120_000;
 
 type ReplicateOutput =
@@ -45,14 +44,10 @@ export class ReplicateImageProvider implements ImageGenerationProvider {
   }
 
   private async generateOne(request: JewelryImagePrompt): Promise<GeneratedImage> {
+    const model = request.model ?? imageModels.flux2ProGeneration;
     const output = await withTimeout(
-      this.client.run(generationModel, {
-        input: {
-          prompt: request.prompt,
-          aspect_ratio: "1:1",
-          output_format: "webp",
-          safety_tolerance: 2
-        }
+      this.client.run(model, {
+        input: buildGenerationInput(model, request.prompt)
       }) as Promise<ReplicateOutput>,
       requestTimeoutMs
     );
@@ -78,15 +73,11 @@ export class ReplicateImageProvider implements ImageGenerationProvider {
 
   async editDesign(request: EditDesignProviderRequest): Promise<GeneratedImage> {
     let output: ReplicateOutput;
+    const model = request.model ?? imageModels.fluxKontextProEdit;
     try {
       output = await withTimeout(
-        this.client.run(editModel, {
-          input: {
-            prompt: request.prompt,
-            input_image: request.imageUrl,
-            output_format: "png",
-            safety_tolerance: 2
-          }
+        this.client.run(model, {
+          input: buildEditInput(model, request.prompt, request.imageUrl)
         }) as Promise<ReplicateOutput>,
         requestTimeoutMs
       );
@@ -115,6 +106,39 @@ export class ReplicateImageProvider implements ImageGenerationProvider {
       createdAt: new Date().toISOString()
     };
   }
+}
+
+function buildGenerationInput(model: ReplicateImageModel, prompt: string) {
+  if (model === imageModels.krea2Medium) {
+    return {
+      prompt,
+      aspect_ratio: "1:1"
+    };
+  }
+
+  return {
+    prompt,
+    aspect_ratio: "1:1",
+    output_format: "webp",
+    safety_tolerance: 2
+  };
+}
+
+function buildEditInput(model: ReplicateImageModel, prompt: string, imageUrl: string) {
+  if (model === imageModels.krea2Medium) {
+    return {
+      prompt,
+      input_image: imageUrl,
+      aspect_ratio: "1:1"
+    };
+  }
+
+  return {
+    prompt,
+    input_image: imageUrl,
+    output_format: "png",
+    safety_tolerance: 2
+  };
 }
 
 function getErrorMessage(error: unknown) {
