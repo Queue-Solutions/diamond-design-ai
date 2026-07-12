@@ -10,6 +10,9 @@ export type DesignProfile = {
   setting: string;
   bandStyle: string;
   budgetRange: string;
+  personalizationText: string;
+  personalizationScript: string;
+  fontPreference: string;
   notes: string[];
   readyForGeneration: boolean;
 };
@@ -96,6 +99,9 @@ export const emptyDesignProfile: DesignProfile = {
   setting: "",
   bandStyle: "",
   budgetRange: "",
+  personalizationText: "",
+  personalizationScript: "",
+  fontPreference: "",
   notes: [],
   readyForGeneration: false
 };

@@ -1,4 +1,5 @@
 import type { DesignProfile } from "@/types/design";
+import { jewelryFonts } from "@/config/jewelry-fonts";
 
 export function updateDesignProfileFromEdit(profile: DesignProfile, instruction: string): DesignProfile {
   const text = instruction.toLowerCase();
@@ -30,6 +31,12 @@ export function updateDesignProfileFromEdit(profile: DesignProfile, instruction:
 
   if (text.includes("minimal")) next.style = "Minimal";
   if (text.includes("luxurious") || text.includes("more luxury") || text.includes("more luxurious")) next.style = "Luxury";
+
+  const requestedFont = jewelryFonts.find((font) => text.includes(font.name.toLowerCase()));
+  if (requestedFont) next.fontPreference = requestedFont.name;
+
+  if (text.includes("arabic")) next.personalizationScript = "Arabic";
+  if (text.includes("english") || text.includes("latin")) next.personalizationScript = "English or Latin";
 
   const note = `Edit request: ${instruction.trim()}`;
   if (!next.notes.includes(note)) {

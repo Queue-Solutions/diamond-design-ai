@@ -55,7 +55,10 @@ function completedCoreFields(profile: DesignProfile) {
     profile.diamondShape,
     profile.setting,
     profile.bandStyle,
-    profile.budgetRange
+    profile.budgetRange,
+    profile.personalizationText,
+    profile.personalizationScript,
+    profile.fontPreference
   ].filter(Boolean).length;
 }
 

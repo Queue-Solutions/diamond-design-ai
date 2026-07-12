@@ -43,6 +43,9 @@ export async function POST(request: Request) {
         setting: "",
         bandStyle: "",
         budgetRange: "",
+        personalizationText: "",
+        personalizationScript: "",
+        fontPreference: "",
         notes: [],
         readyForGeneration: false
       }

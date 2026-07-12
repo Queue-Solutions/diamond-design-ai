@@ -38,6 +38,7 @@ import { normalizeDesignProfile, statusLabel } from "@/lib/design-profile";
 import { createBriefText, downloadDesignPdf, downloadWorkshopPng } from "@/lib/export-design";
 import { clearDiamondSession, loadDiamondSession, saveDiamondSession } from "@/lib/session-store";
 import { cn } from "@/lib/utils";
+import { getJewelryFontById } from "@/config/jewelry-fonts";
 import { publicEnv } from "@/config/public-env";
 import { BrowserLocalImageStorage, StorageValidationError, type StoredImage } from "@/services/storage";
 import { useLanguage } from "@/lib/language";
@@ -82,6 +83,9 @@ const profileLabels: Array<[keyof Omit<DesignProfile, "readyForGeneration">, str
   ["recipient", "Recipient", "Occasion"],
   ["bandStyle", "Band", "Setting"],
   ["budgetRange", "Budget", "Style"],
+  ["personalizationText", "Name Text", "Personalization"],
+  ["personalizationScript", "Script", "Personalization"],
+  ["fontPreference", "Font", "Personalization"],
   ["notes", "Notes", "Notes"]
 ];
 
@@ -128,6 +132,7 @@ export default function ChatPage() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const imageRefreshInFlightRef = useRef(false);
   const inspirationLoadedRef = useRef(false);
+  const fontLoadedRef = useRef(false);
   const storage = useMemo(() => new BrowserLocalImageStorage(), []);
 
   const sortedConcepts = useMemo(
@@ -178,7 +183,7 @@ export default function ChatPage() {
     const saved = loadDiamondSession(user?.id);
     if (saved) {
       setMessages(saved.messages.length ? saved.messages : [initialAssistantMessage]);
-      setDesignProfile(saved.designProfile);
+      setDesignProfile(normalizeDesignProfile(saved.designProfile));
       setStage(saved.stage);
       setSuggestedActions(cleanClientSuggestions(saved.suggestedActions));
       setGeneratedConcepts(saved.generatedConcepts);
@@ -347,6 +352,40 @@ export default function ChatPage() {
         readyForGeneration: current.readyForGeneration
       })
     );
+    window.history.replaceState({}, "", window.location.pathname);
+  }, [sessionLoaded]);
+
+  useEffect(() => {
+    if (!sessionLoaded || fontLoadedRef.current || typeof window === "undefined") return;
+
+    const params = new URLSearchParams(window.location.search);
+    const fontId = params.get("font");
+    const selectedFont = getJewelryFontById(fontId);
+    if (!selectedFont) return;
+
+    fontLoadedRef.current = true;
+    setDesignProfile((current) =>
+      normalizeDesignProfile({
+        ...current,
+        fontPreference: selectedFont.name,
+        personalizationScript:
+          current.personalizationScript ||
+          (selectedFont.supportsArabic ? "Arabic or English, exact spelling required" : "English or Latin"),
+        notes: [
+          ...current.notes,
+          `Selected font: ${selectedFont.name} (${selectedFont.category})`
+        ]
+      })
+    );
+    setMessages((current) => [
+      ...current,
+      {
+        id: crypto.randomUUID(),
+        role: "assistant",
+        content: `I've set ${selectedFont.name} as your lettering preference. Tell me the exact name or inscription, and if it is Arabic, please type the exact Arabic spelling you want in the jewelry.`,
+        createdAt: new Date().toISOString()
+      }
+    ]);
     window.history.replaceState({}, "", window.location.pathname);
   }, [sessionLoaded]);
 
@@ -1757,7 +1796,7 @@ function ProfileSummary({
 }: {
   items: Array<{ key: keyof Omit<DesignProfile, "readyForGeneration">; label: string; section: string; value: string }>;
 }) {
-  const sections = ["Jewelry", "Metal", "Stone", "Setting", "Style", "Occasion", "Notes"];
+  const sections = ["Jewelry", "Personalization", "Metal", "Stone", "Setting", "Style", "Occasion", "Notes"];
 
   return (
     <div className="space-y-4">
@@ -2185,7 +2224,10 @@ function getCompletion(profile: DesignProfile) {
     profile.diamondShape,
     profile.setting,
     profile.bandStyle,
-    profile.budgetRange
+    profile.budgetRange,
+    profile.personalizationText,
+    profile.personalizationScript,
+    profile.fontPreference
   ];
   const base = Math.round((fields.filter(Boolean).length / fields.length) * 85);
   return Math.min(100, base + (profile.readyForGeneration ? 15 : 0));

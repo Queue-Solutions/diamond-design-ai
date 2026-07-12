@@ -1,4 +1,4 @@
-import { Gem, Image, Plus, UserRound } from "lucide-react";
+import { Gem, Image, LetterText, Plus, UserRound } from "lucide-react";
 
 export const navigationItems = [
   {
@@ -18,6 +18,12 @@ export const navigationItems = [
     titleAr: "إلهام",
     href: "/inspiration",
     icon: Gem
+  },
+  {
+    title: "Fonts",
+    titleAr: "خطوط",
+    href: "/fonts",
+    icon: LetterText
   },
   {
     title: "Profile",

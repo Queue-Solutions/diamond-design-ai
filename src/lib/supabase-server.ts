@@ -561,7 +561,7 @@ function sumUnits(rows: Array<{ units: number | null }> | null) {
 }
 
 function createSessionTitle(profile: DesignProfile) {
-  const parts = [profile.style, profile.diamondShape, profile.jewelryType].filter(Boolean);
+  const parts = [profile.personalizationText, profile.fontPreference, profile.style, profile.diamondShape, profile.jewelryType].filter(Boolean);
   return parts.length ? parts.join(" ") : "Diamond Design Session";
 }
 
