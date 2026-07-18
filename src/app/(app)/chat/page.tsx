@@ -10,7 +10,6 @@ import {
   ChevronRight,
   Check,
   Columns2,
-  Copy,
   Download,
   Gem,
   Heart,
@@ -18,6 +17,7 @@ import {
   Printer,
   SendHorizontal,
   Sparkles,
+  Store,
   Plus,
   Upload,
   Wand2,
@@ -35,7 +35,7 @@ import {
 import { LoadingSkeleton } from "@/components/shared/loading-skeleton";
 import { useAuth } from "@/components/auth/auth-provider";
 import { normalizeDesignProfile, statusLabel } from "@/lib/design-profile";
-import { createBriefText, downloadDesignPdf, downloadWorkshopPng } from "@/lib/export-design";
+import { downloadDesignPdf, printDesignPdf } from "@/lib/export-design";
 import { clearDiamondSession, loadDiamondSession, saveDiamondSession } from "@/lib/session-store";
 import { cn } from "@/lib/utils";
 import { getJewelryFontById } from "@/config/jewelry-fonts";
@@ -856,36 +856,20 @@ export default function ChatPage() {
           onUpload={() => setUploadOpen(true)}
           onSelect={setSelectedConceptId}
           onPrepareBrief={(concept) => setFinalizeCandidate(concept)}
-          onCopySummary={async () => {
-            if (!designBrief || !finalizedConcept) return;
-            try {
-              await navigator.clipboard.writeText(createBriefText(designBrief, finalizedConcept));
-            } catch {
-              setError("Copy failed. Your browser may require clipboard permission.");
-            }
-          }}
-          onCopyReference={async () => {
-            try {
-              if (referenceId) await navigator.clipboard.writeText(referenceId);
-            } catch {
-              setError("Copy failed. Your browser may require clipboard permission.");
-            }
-          }}
           onDownloadPdf={() => {
             if (designBrief && finalizedConcept) {
               void downloadDesignPdf({ concept: finalizedConcept, brief: designBrief, profile: designProfile }).catch(() =>
-                setError("PDF export could not be completed. Try the print option as a fallback.")
+                setError("PDF export could not be completed. Please try again.")
               );
             }
           }}
-          onDownloadPng={() => {
+          onPrint={() => {
             if (designBrief && finalizedConcept) {
-              void downloadWorkshopPng({ concept: finalizedConcept, brief: designBrief, profile: designProfile }).catch(() =>
-                setError("PNG export could not be completed. The source image may block browser export.")
+              void printDesignPdf({ concept: finalizedConcept, brief: designBrief, profile: designProfile }).catch((printError) =>
+                setError(printError instanceof Error ? printError.message : "The printable design brief could not be opened.")
               );
             }
           }}
-          onPrint={() => window.print()}
         />
       </div>
 
@@ -1576,10 +1560,7 @@ function StudioPanel({
   onUpload,
   onSelect,
   onPrepareBrief,
-  onCopySummary,
-  onCopyReference,
   onDownloadPdf,
-  onDownloadPng,
   onPrint
 }: {
   profile: DesignProfile;
@@ -1598,10 +1579,7 @@ function StudioPanel({
   onUpload: () => void;
   onSelect: (id: string) => void;
   onPrepareBrief: (concept: GeneratedConcept) => void;
-  onCopySummary: () => void;
-  onCopyReference: () => void;
   onDownloadPdf: () => void;
-  onDownloadPng: () => void;
   onPrint: () => void;
 }) {
   const { t } = useLanguage();
@@ -1695,22 +1673,14 @@ function StudioPanel({
                       <Download className="h-4 w-4" />
                       PDF
                     </Button>
-                    <Button variant="secondary" size="sm" onClick={onDownloadPng}>
-                      <Download className="h-4 w-4" />
-                      PNG
-                    </Button>
-                    <Button variant="secondary" size="sm" onClick={onCopySummary}>
-                      <Copy className="h-4 w-4" />
-                      Copy Summary
-                    </Button>
                     <Button variant="secondary" size="sm" onClick={onPrint}>
                       <Printer className="h-4 w-4" />
-                      Print
+                      {t("Print", "طباعة")}
                     </Button>
                   </div>
-                  <Button className="w-full" variant="outline" onClick={onCopyReference}>
-                    <Copy className="h-4 w-4" />
-                    Share Design Reference
+                  <Button className="w-full" variant="outline" disabled title="Manufacturer connection coming soon">
+                    <Store className="h-4 w-4" />
+                    {t("Send to shop", "إرسال إلى المتجر")}
                   </Button>
                 </>
               ) : (

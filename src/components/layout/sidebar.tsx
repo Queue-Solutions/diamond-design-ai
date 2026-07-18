@@ -1,13 +1,23 @@
 "use client";
 
 import Link from "next/link";
-import { Gem } from "lucide-react";
+import { Gem, MessageCircle } from "lucide-react";
 import { navigationItems } from "@/config/navigation";
 import { useLanguage } from "@/lib/language";
 import { cn } from "@/lib/utils";
 
 export function Sidebar() {
   const { isArabic, t } = useLanguage();
+  const sidebarNavigationItems = navigationItems.map((item) =>
+    item.href === "/chat"
+      ? {
+          ...item,
+          title: "Chat",
+          titleAr: "المحادثة",
+          icon: MessageCircle
+        }
+      : item
+  );
 
   return (
     <aside
@@ -29,7 +39,7 @@ export function Sidebar() {
       <div className="atelier-line my-10 h-px" />
 
       <nav className="space-y-1">
-        {navigationItems.map((item) => (
+        {sidebarNavigationItems.map((item) => (
           <Link
             key={item.title}
             href={item.href}
