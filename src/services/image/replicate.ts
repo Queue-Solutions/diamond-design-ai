@@ -1,6 +1,7 @@
 import Replicate from "replicate";
 import { requireReplicateApiToken, serverEnv } from "@/config/env";
-import { imageModels, type ReplicateImageModel } from "./models";
+import { imageModels } from "./models";
+import { buildReplicateEditInput, buildReplicateGenerationInput } from "./replicate-inputs";
 import {
   ImageGenerationError,
   MissingImageApiTokenError,
@@ -44,13 +45,19 @@ export class ReplicateImageProvider implements ImageGenerationProvider {
   }
 
   private async generateOne(request: JewelryImagePrompt): Promise<GeneratedImage> {
-    const model = request.model ?? imageModels.flux2ProGeneration;
-    const output = await withTimeout(
-      this.client.run(model, {
-        input: buildGenerationInput(model, request.prompt)
-      }) as Promise<ReplicateOutput>,
-      requestTimeoutMs
-    );
+    const model = request.model ?? imageModels.flux2Pro;
+    let output: ReplicateOutput;
+
+    try {
+      output = await withTimeout(
+        this.client.run(model, {
+          input: buildReplicateGenerationInput(model, request.prompt)
+        }) as Promise<ReplicateOutput>,
+        requestTimeoutMs
+      );
+    } catch (error) {
+      throw new ImageGenerationError(`Replicate image generation failed: ${getErrorMessage(error)}`);
+    }
 
     const url = extractImageUrl(output);
 
@@ -73,11 +80,11 @@ export class ReplicateImageProvider implements ImageGenerationProvider {
 
   async editDesign(request: EditDesignProviderRequest): Promise<GeneratedImage> {
     let output: ReplicateOutput;
-    const model = request.model ?? imageModels.fluxKontextProEdit;
+    const model = request.model ?? imageModels.flux2Pro;
     try {
       output = await withTimeout(
         this.client.run(model, {
-          input: buildEditInput(model, request.prompt, request.imageUrl)
+          input: buildReplicateEditInput(model, request.prompt, request.imageUrl)
         }) as Promise<ReplicateOutput>,
         requestTimeoutMs
       );
@@ -106,39 +113,6 @@ export class ReplicateImageProvider implements ImageGenerationProvider {
       createdAt: new Date().toISOString()
     };
   }
-}
-
-function buildGenerationInput(model: ReplicateImageModel, prompt: string) {
-  if (model === imageModels.krea2Medium) {
-    return {
-      prompt,
-      aspect_ratio: "1:1"
-    };
-  }
-
-  return {
-    prompt,
-    aspect_ratio: "1:1",
-    output_format: "webp",
-    safety_tolerance: 2
-  };
-}
-
-function buildEditInput(model: ReplicateImageModel, prompt: string, imageUrl: string) {
-  if (model === imageModels.krea2Medium) {
-    return {
-      prompt,
-      input_image: imageUrl,
-      aspect_ratio: "1:1"
-    };
-  }
-
-  return {
-    prompt,
-    input_image: imageUrl,
-    output_format: "png",
-    safety_tolerance: 2
-  };
 }
 
 function getErrorMessage(error: unknown) {

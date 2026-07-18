@@ -6,10 +6,37 @@ export function containsArabicText(value: string | null | undefined) {
   return arabicUnicodePattern.test(value ?? "");
 }
 
-export function requiresArabicJewelryLettering(profile: DesignProfile) {
-  return isConfirmedArabicScript(profile.personalizationScript) || containsArabicText(profile.personalizationText);
+export function requiresArabicJewelryLettering({
+  designProfile,
+  updatedDesignProfile,
+  editInstruction
+}: {
+  designProfile: DesignProfile;
+  updatedDesignProfile?: DesignProfile;
+  editInstruction?: string;
+}) {
+  const desiredProfile = updatedDesignProfile ?? designProfile;
+  const personalizationText = desiredProfile.personalizationText.trim();
+
+  if (containsArabicText(personalizationText)) {
+    return true;
+  }
+
+  if (hasExplicitArabicLetteringRequest(editInstruction)) {
+    return true;
+  }
+
+  return isConfirmedArabicScript(desiredProfile.personalizationScript) && Boolean(personalizationText);
 }
 
 function isConfirmedArabicScript(value: string) {
   return value.trim().toLowerCase() === "arabic";
+}
+
+function hasExplicitArabicLetteringRequest(value: string | undefined) {
+  if (!value) return false;
+
+  return /\barabic\s+(?:name|initial|inscription|lettering|text|calligraphy)\b|(?:اسم|حرف|نقش|كتابة|خط)\s+(?:عربي|بالعربية)|(?:خط|كتابة|نقش)\s+عربي/iu.test(
+    value
+  );
 }

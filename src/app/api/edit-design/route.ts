@@ -1,11 +1,10 @@
 import { NextResponse } from "next/server";
 import { serverEnv } from "@/config/env";
-import { estimatedCosts } from "@/config/costs";
+import { estimatedImageCosts } from "@/config/costs";
 import { ApiInputError, handleApiError, methodNotAllowed, parseJsonBody } from "@/lib/api-response";
 import { createDemoEditedConcept } from "@/lib/demo-data";
 import { normalizeDesignProfile } from "@/lib/design-profile";
 import { updateDesignProfileFromEdit } from "@/lib/edit-profile";
-import { requiresArabicJewelryLettering } from "@/lib/personalization";
 import { requireRateLimit } from "@/lib/rate-limit";
 import {
   getOrCreateDesignSession,
@@ -24,7 +23,7 @@ import {
   MissingImageApiTokenError,
   ReplicateImageProvider,
   buildEditPrompt,
-  imageModels
+  resolveImageModel
 } from "@/services/image";
 import type { DesignProfile } from "@/types/design";
 
@@ -62,13 +61,24 @@ export async function POST(request: Request) {
     const designProfile = normalizeDesignProfile(body.designProfile);
     const updatedDesignProfile = updateDesignProfileFromEdit(designProfile, editInstruction);
     const variationName = body.variationName?.trim() || "Edited Concept";
-    const selectedModel = requiresArabicJewelryLettering(updatedDesignProfile)
-      ? imageModels.krea2Medium
-      : imageModels.fluxKontextProEdit;
+    const routing = resolveImageModel({
+      preference: designProfile.imageModelPreference,
+      designProfile,
+      updatedDesignProfile,
+      editInstruction,
+      operation: "editing"
+    });
+    const selectedModel = routing.modelIdentifier;
+    const routingMetadata = {
+      modelPreference: routing.preference,
+      effectiveModelPreference: routing.effectivePreference,
+      wasArabicOverride: routing.wasArabicOverride
+    };
     const prompt = buildEditPrompt({
       designProfile: updatedDesignProfile,
       editInstruction,
-      sourceVariationName: variationName
+      sourceVariationName: variationName,
+      preference: routing.effectivePreference
     });
 
     if (serverEnv.demoMode && !serverEnv.replicateApiToken) {
@@ -81,7 +91,8 @@ export async function POST(request: Request) {
           editInstruction
         }),
         updatedDesignProfile,
-        demoMode: true
+        demoMode: true,
+        ...routingMetadata
       });
     }
 
@@ -103,13 +114,11 @@ export async function POST(request: Request) {
       eventType: "image_edit",
       provider: "replicate",
       model: selectedModel,
-      estimatedCost:
-        selectedModel === imageModels.krea2Medium
-          ? estimatedCosts.replicateKrea2MediumImage
-          : estimatedCosts.replicateFluxKontextProEdit,
+      estimatedCost: estimatedImageCosts[routing.effectivePreference],
       metadata: {
         sourceImageId: body.sourceImageId,
-        routing: selectedModel === imageModels.krea2Medium ? "arabic_lettering" : "default"
+        model: selectedModel,
+        ...routingMetadata
       }
     });
     const startedAt = Date.now();
@@ -153,7 +162,7 @@ export async function POST(request: Request) {
         usageEventId: reservation.usageEventId,
         designImageId: record.id,
         latencyMs: Date.now() - startedAt,
-        metadata: { sourceImageId: body.sourceImageId, storagePath: stored.storagePath, model: selectedModel }
+        metadata: { sourceImageId: body.sourceImageId, storagePath: stored.storagePath, model: selectedModel, ...routingMetadata }
       });
     } catch (error) {
       try {
@@ -161,7 +170,7 @@ export async function POST(request: Request) {
           usageEventId: reservation.usageEventId,
           latencyMs: Date.now() - startedAt,
           errorCode: error instanceof ImageGenerationError ? "IMAGE_PROVIDER_ERROR" : "IMAGE_FLOW_ERROR",
-          metadata: { sourceImageId: body.sourceImageId, model: selectedModel }
+          metadata: { sourceImageId: body.sourceImageId, model: selectedModel, ...routingMetadata }
         });
       } catch (statusError) {
         console.error("Reserved image edit usage event could not be marked failed.", statusError);
@@ -173,7 +182,8 @@ export async function POST(request: Request) {
     return NextResponse.json({
       image: await mapImageRecordToConcept(record),
       updatedDesignProfile,
-      sessionId
+      sessionId,
+      ...routingMetadata
     });
   } catch (error) {
     if (error instanceof UsageReservationError) {

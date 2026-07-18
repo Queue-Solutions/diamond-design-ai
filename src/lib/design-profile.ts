@@ -1,4 +1,9 @@
-import { type ConversationStage, type DesignProfile, emptyDesignProfile } from "@/types/design";
+import {
+  type ConversationStage,
+  type DesignProfile,
+  type ImageModelPreference,
+  emptyDesignProfile
+} from "@/types/design";
 
 const profileKeys = Object.keys(emptyDesignProfile) as Array<keyof DesignProfile>;
 
@@ -21,10 +26,28 @@ export function normalizeDesignProfile(input: unknown): DesignProfile {
       continue;
     }
 
-    profile[key] = typeof value === "string" ? value.trim() : "";
+    if (key === "imageModelPreference") {
+      profile.imageModelPreference = normalizeImageModelPreference(value);
+      continue;
+    }
+
+    profile[key] = (typeof value === "string" ? value.trim() : "") as never;
   }
 
   return profile;
+}
+
+export function normalizeImageModelPreference(input: unknown): ImageModelPreference {
+  if (
+    input === "default" ||
+    input === "precise_changes" ||
+    input === "names_lettering" ||
+    input === "creative_exploration"
+  ) {
+    return input;
+  }
+
+  return "default";
 }
 
 export function normalizeStage(input: unknown, profile: DesignProfile): ConversationStage {

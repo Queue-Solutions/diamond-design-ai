@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { ApiInputError, handleApiError, methodNotAllowed, parseJsonBody } from "@/lib/api-response";
+import { normalizeDesignProfile } from "@/lib/design-profile";
 import {
   getOrCreateDesignSession,
   logUsageEvent,
@@ -33,22 +34,7 @@ export async function POST(request: Request) {
     const sessionId = await getOrCreateDesignSession({
       userId: auth.user.id,
       sessionId: body.sessionId,
-      designProfile: body.designProfile ?? {
-        jewelryType: "",
-        occasion: "",
-        recipient: "",
-        style: "",
-        metal: "",
-        diamondShape: "",
-        setting: "",
-        bandStyle: "",
-        budgetRange: "",
-        personalizationText: "",
-        personalizationScript: "",
-        fontPreference: "",
-        notes: [],
-        readyForGeneration: false
-      }
+      designProfile: normalizeDesignProfile(body.designProfile)
     });
     const stored = await storeImageFromDataUrl({
       dataUrl: body.concept.url,

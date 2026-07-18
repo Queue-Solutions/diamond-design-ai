@@ -1,5 +1,11 @@
 export type ConversationStage = "discovery" | "refinement" | "ready_to_generate";
 
+export type ImageModelPreference =
+  | "default"
+  | "precise_changes"
+  | "names_lettering"
+  | "creative_exploration";
+
 export type DesignProfile = {
   jewelryType: string;
   occasion: string;
@@ -13,6 +19,7 @@ export type DesignProfile = {
   personalizationText: string;
   personalizationScript: string;
   fontPreference: string;
+  imageModelPreference: ImageModelPreference;
   notes: string[];
   readyForGeneration: boolean;
 };
@@ -102,6 +109,7 @@ export const emptyDesignProfile: DesignProfile = {
   personalizationText: "",
   personalizationScript: "",
   fontPreference: "",
+  imageModelPreference: "default",
   notes: [],
   readyForGeneration: false
 };

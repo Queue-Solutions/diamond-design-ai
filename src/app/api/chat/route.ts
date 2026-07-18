@@ -75,7 +75,12 @@ export async function POST(request: Request) {
     }
 
     const parsed = parseModelResponse(completion.content);
-    const updatedDesignProfile = normalizeDesignProfile(parsed.updatedDesignProfile);
+    const updatedDesignProfile = normalizeDesignProfile({
+      ...(typeof parsed.updatedDesignProfile === "object" && parsed.updatedDesignProfile !== null
+        ? parsed.updatedDesignProfile
+        : {}),
+      imageModelPreference: designProfile.imageModelPreference
+    });
     const stage = normalizeStage(parsed.stage, updatedDesignProfile);
     await logUsageEvent({
       userId: auth.user.id,

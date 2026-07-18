@@ -33,8 +33,10 @@ import {
   DialogTitle
 } from "@/components/ui/dialog";
 import { LoadingSkeleton } from "@/components/shared/loading-skeleton";
+import { AdvancedImageSettings } from "@/components/chat/advanced-image-settings";
 import { useAuth } from "@/components/auth/auth-provider";
 import { normalizeDesignProfile, statusLabel } from "@/lib/design-profile";
+import { requiresArabicJewelryLettering } from "@/lib/personalization";
 import { downloadDesignPdf, printDesignPdf } from "@/lib/export-design";
 import { clearDiamondSession, loadDiamondSession, saveDiamondSession } from "@/lib/session-store";
 import { cn } from "@/lib/utils";
@@ -51,6 +53,7 @@ import {
   type ConversationStage,
   type DesignProfile,
   type GeneratedConcept,
+  type ImageModelPreference,
   emptyDesignProfile
 } from "@/types/design";
 
@@ -175,6 +178,10 @@ export default function ChatPage() {
   );
 
   const completion = useMemo(() => getCompletion(designProfile), [designProfile]);
+  const arabicLetteringRequired = useMemo(
+    () => requiresArabicJewelryLettering({ designProfile }),
+    [designProfile]
+  );
   const comparisonConcepts = comparisonIds
     .map((id) => sortedConcepts.find((concept) => concept.id === id))
     .filter((concept): concept is GeneratedConcept => Boolean(concept));
@@ -444,7 +451,10 @@ export default function ChatPage() {
       const payload = (await response.json()) as Partial<ChatApiResponse> & { error?: string };
       if (!response.ok) throw new Error(payload.error ?? "The consultant could not respond. Please try again.");
 
-      const updatedProfile = normalizeDesignProfile(payload.updatedDesignProfile);
+      const updatedProfile = normalizeDesignProfile({
+        ...payload.updatedDesignProfile,
+        imageModelPreference: designProfile.imageModelPreference
+      });
       setMessages((current) => [
         ...current,
         {
@@ -835,6 +845,13 @@ export default function ChatPage() {
             onCompareImage={toggleCompare}
             onImageError={() => void refreshSessionImages()}
             readyForGeneration={designProfile.readyForGeneration}
+            imageModelPreference={designProfile.imageModelPreference}
+            arabicLetteringRequired={arabicLetteringRequired}
+            onImageModelPreferenceChange={(preference) =>
+              setDesignProfile((current) =>
+                normalizeDesignProfile({ ...current, imageModelPreference: preference })
+              )
+            }
             scrollRef={scrollRef}
           />
         </div>
@@ -992,6 +1009,9 @@ function ConversationPanel({
   onCompareImage,
   onImageError,
   readyForGeneration,
+  imageModelPreference,
+  arabicLetteringRequired,
+  onImageModelPreferenceChange,
   scrollRef
 }: {
   messages: ChatMessage[];
@@ -1026,6 +1046,9 @@ function ConversationPanel({
   onCompareImage: (id: string) => void;
   onImageError: () => void;
   readyForGeneration: boolean;
+  imageModelPreference: ImageModelPreference;
+  arabicLetteringRequired: boolean;
+  onImageModelPreferenceChange: (preference: ImageModelPreference) => void;
   scrollRef: React.RefObject<HTMLDivElement | null>;
 }) {
   const lastAssistantId = [...messages].reverse().find((message) => message.role === "assistant")?.id;
@@ -1161,21 +1184,30 @@ function ConversationPanel({
             ))}
           </div>
 
-          <form onSubmit={onSubmit} className="mt-4 flex items-center gap-3 rounded-[1.25rem] bg-[#050505]/92 p-2 shadow-[inset_0_0_0_1px_rgba(215,196,154,0.13),inset_0_10px_30px_rgba(0,0,0,0.38)]">
-            <Button size="icon" variant="ghost" aria-label="Upload reference image" type="button" onClick={onUpload}>
-              <ImagePlus className="h-5 w-5" />
-            </Button>
-            <input
-              value={input}
-              onChange={(event) => onInputChange(event.target.value)}
-              disabled={isSending}
-            className="h-11 min-w-0 flex-1 bg-transparent px-2 text-sm outline-none placeholder:text-muted-foreground focus-visible:shadow-none disabled:opacity-60"
-              placeholder={t("Describe your dream jewelry...", "صف المجوهرات التي تتخيلها...")}
-              aria-label="Message the diamond consultant"
-            />
-            <Button size="icon" aria-label="Send message" disabled={isSending || !input.trim()}>
-              {isSending ? <Sparkles className="h-5 w-5 animate-pulse" /> : <SendHorizontal className="h-5 w-5" />}
-            </Button>
+          <form onSubmit={onSubmit} className="mt-4 rounded-[1.25rem] bg-[#050505]/92 p-2 shadow-[inset_0_0_0_1px_rgba(215,196,154,0.13),inset_0_10px_30px_rgba(0,0,0,0.38)]">
+            <div className="flex items-center gap-3">
+              <Button size="icon" variant="ghost" aria-label="Upload reference image" type="button" onClick={onUpload}>
+                <ImagePlus className="h-5 w-5" />
+              </Button>
+              <input
+                value={input}
+                onChange={(event) => onInputChange(event.target.value)}
+                disabled={isSending}
+                className="h-11 min-w-0 flex-1 bg-transparent px-2 text-sm outline-none placeholder:text-muted-foreground focus-visible:shadow-none disabled:opacity-60"
+                placeholder={t("Describe your dream jewelry...", "صف المجوهرات التي تتخيلها...")}
+                aria-label="Message the diamond consultant"
+              />
+              <Button size="icon" aria-label="Send message" disabled={isSending || !input.trim()}>
+                {isSending ? <Sparkles className="h-5 w-5 animate-pulse" /> : <SendHorizontal className="h-5 w-5" />}
+              </Button>
+            </div>
+            <div className="flex min-w-0 items-center border-t border-diamond-champagne/[0.07] px-1 pt-1">
+              <AdvancedImageSettings
+                value={imageModelPreference}
+                onChange={onImageModelPreferenceChange}
+                arabicOverride={arabicLetteringRequired}
+              />
+            </div>
           </form>
         </div>
       </div>

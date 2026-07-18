@@ -1,5 +1,6 @@
 import type { DesignProfile } from "@/types/design";
 import { jewelryFonts } from "@/config/jewelry-fonts";
+import { containsArabicText } from "@/lib/personalization";
 
 export function updateDesignProfileFromEdit(profile: DesignProfile, instruction: string): DesignProfile {
   const text = instruction.toLowerCase();
@@ -38,12 +39,63 @@ export function updateDesignProfileFromEdit(profile: DesignProfile, instruction:
   if (text.includes("arabic")) next.personalizationScript = "Arabic";
   if (text.includes("english") || text.includes("latin")) next.personalizationScript = "English or Latin";
 
+  if (removesPersonalization(instruction)) {
+    next.personalizationText = "";
+    next.personalizationScript = "";
+  } else {
+    const requestedPersonalization = extractExplicitPersonalizationText(instruction);
+    if (requestedPersonalization) {
+      next.personalizationText = requestedPersonalization;
+      if (containsArabicText(requestedPersonalization)) {
+        next.personalizationScript = "Arabic";
+      } else if (/\b(?:english|latin)\b/i.test(instruction)) {
+        next.personalizationScript = "English or Latin";
+      }
+    }
+  }
+
   const note = `Edit request: ${instruction.trim()}`;
   if (!next.notes.includes(note)) {
     next.notes = [...next.notes, note].slice(-8);
   }
 
   return next;
+}
+
+function removesPersonalization(instruction: string) {
+  return /\b(?:remove|delete)\s+(?:the\s+)?(?:name|inscription|lettering|text)\b|\b(?:without|no)\s+(?:name|inscription|lettering|text)\b|(?:بدون|من دون)\s+(?:اسم|نقش|كتابة)|احذف\s+(?:الاسم|النقش|الكتابة)/iu.test(
+    instruction
+  );
+}
+
+function extractExplicitPersonalizationText(instruction: string) {
+  const letteringKeyword = /\b(?:name|inscription|lettering|text|initial|arabic)\b|(?:اسم|الاسم|نقش|النقش|كتابة|الكتابة|حرف)/iu;
+  const quotePattern = /["“”'‘’]([^"“”'‘’\r\n]{1,80})["“”'‘’]/gu;
+
+  for (const match of instruction.matchAll(quotePattern)) {
+    const candidate = cleanPersonalizationCandidate(match[1]);
+    const start = Math.max(0, (match.index ?? 0) - 80);
+    const end = Math.min(instruction.length, (match.index ?? 0) + match[0].length + 40);
+    if (candidate && letteringKeyword.test(instruction.slice(start, end))) {
+      return candidate;
+    }
+  }
+
+  const explicitPatterns = [
+    /\b(?:arabic\s+)?(?:name|inscription|lettering|text|initial)\s*(?:to|with|as|is|:)?\s*([\p{Script=Arabic}\p{Mark}]{1,40})/iu,
+    /(?:باسم|الاسم|النقش|الكتابة|حرف)\s*(?:إلى|الى|هو|هي|:)?\s*([\p{Script=Arabic}\p{Mark}]{1,40})/u
+  ];
+
+  for (const pattern of explicitPatterns) {
+    const candidate = cleanPersonalizationCandidate(instruction.match(pattern)?.[1]);
+    if (candidate) return candidate;
+  }
+
+  return "";
+}
+
+function cleanPersonalizationCandidate(value: string | undefined) {
+  return (value ?? "").trim().replace(/[.,!?؛،:]+$/u, "").slice(0, 80);
 }
 
 function titleCase(value: string) {

@@ -1,10 +1,9 @@
 import { NextResponse } from "next/server";
 import { serverEnv } from "@/config/env";
-import { estimatedCosts } from "@/config/costs";
+import { estimatedImageCosts } from "@/config/costs";
 import { ApiInputError, handleApiError, methodNotAllowed, parseJsonBody } from "@/lib/api-response";
 import { createDemoConcepts } from "@/lib/demo-data";
 import { normalizeDesignProfile } from "@/lib/design-profile";
-import { requiresArabicJewelryLettering } from "@/lib/personalization";
 import { requireRateLimit } from "@/lib/rate-limit";
 import {
   getOrCreateDesignSession,
@@ -22,7 +21,7 @@ import {
   MissingImageApiTokenError,
   ReplicateImageProvider,
   buildDiamondConceptPrompts,
-  imageModels
+  resolveImageModel
 } from "@/services/image";
 import type { ChatMessage, DesignProfile } from "@/types/design";
 
@@ -44,8 +43,19 @@ export async function POST(request: Request) {
       throw new ApiInputError("The design direction is not ready yet. Continue the consultation before generating concepts.");
     }
 
+    const routing = resolveImageModel({
+      preference: designProfile.imageModelPreference,
+      designProfile,
+      operation: "generation"
+    });
+    const routingMetadata = {
+      modelPreference: routing.preference,
+      effectiveModelPreference: routing.effectivePreference,
+      wasArabicOverride: routing.wasArabicOverride
+    };
+
     if (serverEnv.demoMode && !serverEnv.replicateApiToken) {
-      return NextResponse.json({ images: createDemoConcepts(), demoMode: true });
+      return NextResponse.json({ images: createDemoConcepts(), demoMode: true, ...routingMetadata });
     }
 
     const auth = await requireAuthenticatedUser(request);
@@ -60,25 +70,19 @@ export async function POST(request: Request) {
       designProfile
     });
 
-    const selectedModel = requiresArabicJewelryLettering(designProfile)
-      ? imageModels.krea2Medium
-      : imageModels.flux2ProGeneration;
-    const prompts = buildDiamondConceptPrompts(designProfile).map((prompt) => ({
+    const selectedModel = routing.modelIdentifier;
+    const prompts = buildDiamondConceptPrompts(designProfile, routing.effectivePreference).map((prompt) => ({
       ...prompt,
       model: selectedModel
     }));
-    const estimatedCost =
-      selectedModel === imageModels.krea2Medium
-        ? estimatedCosts.replicateKrea2MediumImage
-        : estimatedCosts.replicateFlux2ProGeneration;
     const reservation = await reserveImageCredit({
       userId: auth.user.id,
       sessionId,
       eventType: "image_generation",
       provider: "replicate",
       model: selectedModel,
-      estimatedCost,
-      metadata: { promptCount: prompts.length, routing: selectedModel === imageModels.krea2Medium ? "arabic_lettering" : "default" }
+      estimatedCost: estimatedImageCosts[routing.effectivePreference],
+      metadata: { promptCount: prompts.length, model: selectedModel, ...routingMetadata }
     });
     const startedAt = Date.now();
     const savedImages = [];
@@ -112,7 +116,7 @@ export async function POST(request: Request) {
           usageEventId: reservation.usageEventId,
           designImageId: record.id,
           latencyMs: Date.now() - startedAt,
-          metadata: { promptCount: prompts.length, storagePath: stored.storagePath, model: selectedModel }
+          metadata: { promptCount: prompts.length, storagePath: stored.storagePath, model: selectedModel, ...routingMetadata }
         });
 
         savedImages.push(await mapImageRecordToConcept(record));
@@ -123,7 +127,7 @@ export async function POST(request: Request) {
           usageEventId: reservation.usageEventId,
           latencyMs: Date.now() - startedAt,
           errorCode: error instanceof ImageGenerationError ? "IMAGE_PROVIDER_ERROR" : "IMAGE_FLOW_ERROR",
-          metadata: { promptCount: prompts.length, model: selectedModel }
+          metadata: { promptCount: prompts.length, model: selectedModel, ...routingMetadata }
         });
       } catch (statusError) {
         console.error("Reserved image generation usage event could not be marked failed.", statusError);
@@ -132,7 +136,7 @@ export async function POST(request: Request) {
       throw error;
     }
 
-    return NextResponse.json({ images: savedImages, sessionId });
+    return NextResponse.json({ images: savedImages, sessionId, ...routingMetadata });
   } catch (error) {
     if (error instanceof UsageReservationError) {
       return NextResponse.json(
