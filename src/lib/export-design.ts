@@ -1,15 +1,36 @@
 import { jsPDF } from "jspdf";
 import type { DesignBrief, DesignProfile, GeneratedConcept } from "@/types/design";
 
-export async function downloadDesignPdf({
-  concept,
-  brief,
-  profile
-}: {
+type DesignPdfOptions = {
   concept: GeneratedConcept;
   brief: DesignBrief;
   profile: DesignProfile;
-}) {
+};
+
+export async function downloadDesignPdf(options: DesignPdfOptions) {
+  const pdf = await createDesignPdf(options);
+  pdf.save(`${options.brief.referenceId}-design-brief.pdf`);
+}
+
+export async function printDesignPdf(options: DesignPdfOptions) {
+  const printWindow = window.open("", "_blank");
+  if (!printWindow) {
+    throw new Error("Allow pop-ups to open the printable design brief.");
+  }
+
+  try {
+    const pdf = await createDesignPdf(options);
+    pdf.autoPrint();
+    const pdfUrl = URL.createObjectURL(pdf.output("blob"));
+    printWindow.location.href = pdfUrl;
+    window.setTimeout(() => URL.revokeObjectURL(pdfUrl), 60_000);
+  } catch (error) {
+    printWindow.close();
+    throw error;
+  }
+}
+
+async function createDesignPdf({ concept, brief, profile }: DesignPdfOptions) {
   const pdf = new jsPDF({ unit: "pt", format: "a4" });
   const margin = 48;
   const width = pdf.internal.pageSize.getWidth();
@@ -38,8 +59,7 @@ export async function downloadDesignPdf({
     ["Metal", brief.metal || profile.metal],
     ["Diamond Shape", brief.diamondShape || profile.diamondShape],
     ["Setting", brief.setting || profile.setting],
-    ["Band Style", brief.bandStyle || profile.bandStyle],
-    ["Version", `V${concept.version}`]
+    ["Band Style", brief.bandStyle || profile.bandStyle]
   ];
 
   let detailY = y + 12;
@@ -62,7 +82,7 @@ export async function downloadDesignPdf({
   y = addSection(pdf, "Revision History Summary", brief.revisionHistorySummary, margin, y, width);
   addSection(pdf, "Disclaimer", brief.disclaimer, margin, y, width);
 
-  pdf.save(`${brief.referenceId}-design-brief.pdf`);
+  return pdf;
 }
 
 export async function downloadWorkshopPng({
