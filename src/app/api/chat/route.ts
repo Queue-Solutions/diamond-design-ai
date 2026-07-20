@@ -5,7 +5,7 @@ import { ApiInputError, handleApiError, methodNotAllowed, parseJsonBody } from "
 import { diamondConsultantSystemPrompt } from "@/lib/diamond-consultant-prompt";
 import { normalizeDesignProfile, normalizeStage } from "@/lib/design-profile";
 import { requireRateLimit } from "@/lib/rate-limit";
-import { logUsageEvent, requireAuthenticatedUser } from "@/lib/supabase-server";
+import { logUsageEvent, requireAiAccess, requireAuthenticatedUser } from "@/lib/supabase-server";
 import { MissingOpenAiApiKeyError, OpenAiLlmProvider } from "@/services/llm";
 import type { ChatAction, ChatApiRequest, ChatApiResponse, ChatImageContext, ChatMessage } from "@/types/design";
 
@@ -24,12 +24,15 @@ export async function POST(request: Request) {
       throw new ApiInputError("Please send a message to begin the consultation.");
     }
 
+    const auth = await requireAuthenticatedUser(request);
+    if (auth instanceof NextResponse) return auth;
+
+    const accessDenied = requireAiAccess(auth);
+    if (accessDenied) return accessDenied;
+
     if (serverEnv.demoMode && !serverEnv.openaiApiKey) {
       return NextResponse.json(createDemoChatResponse(body.designProfile));
     }
-
-    const auth = await requireAuthenticatedUser(request);
-    if (auth instanceof NextResponse) return auth;
 
     const rateLimit = requireRateLimit(auth.user.id, "/api/chat", 30);
     if (rateLimit) return rateLimit;

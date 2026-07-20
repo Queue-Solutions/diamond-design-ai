@@ -9,6 +9,7 @@ import {
   getOrCreateDesignSession,
   logUsageEvent,
   persistDesignImage,
+  requireAiAccess,
   requireAuthenticatedUser
 } from "@/lib/supabase-server";
 import { requireRateLimit } from "@/lib/rate-limit";
@@ -37,12 +38,15 @@ export async function POST(request: Request) {
     const profile = normalizeDesignProfile(body.designProfile);
     const concepts = Array.isArray(body.concepts) ? body.concepts : [body.finalizedConcept];
 
+    const auth = await requireAuthenticatedUser(request);
+    if (auth instanceof NextResponse) return auth;
+
+    const accessDenied = requireAiAccess(auth);
+    if (accessDenied) return accessDenied;
+
     if (serverEnv.demoMode && !serverEnv.openaiApiKey) {
       return NextResponse.json({ brief: createDemoBrief(profile, body.finalizedConcept, referenceId), demoMode: true });
     }
-
-    const auth = await requireAuthenticatedUser(request);
-    if (auth instanceof NextResponse) return auth;
 
     const rateLimit = requireRateLimit(auth.user.id, "/api/design-brief", 10);
     if (rateLimit) return rateLimit;

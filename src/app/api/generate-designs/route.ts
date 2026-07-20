@@ -12,6 +12,7 @@ import {
   mapImageRecordToConcept,
   persistDesignImage,
   reserveImageCredit,
+  requireAiAccess,
   requireAuthenticatedUser,
   storeImageFromUrl,
   UsageReservationError
@@ -54,12 +55,15 @@ export async function POST(request: Request) {
       wasArabicOverride: routing.wasArabicOverride
     };
 
+    const auth = await requireAuthenticatedUser(request);
+    if (auth instanceof NextResponse) return auth;
+
+    const accessDenied = requireAiAccess(auth);
+    if (accessDenied) return accessDenied;
+
     if (serverEnv.demoMode && !serverEnv.replicateApiToken) {
       return NextResponse.json({ images: createDemoConcepts(), demoMode: true, ...routingMetadata });
     }
-
-    const auth = await requireAuthenticatedUser(request);
-    if (auth instanceof NextResponse) return auth;
 
     const rateLimit = requireRateLimit(auth.user.id, "/api/generate-designs", 5);
     if (rateLimit) return rateLimit;

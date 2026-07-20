@@ -14,6 +14,7 @@ import {
   mapImageRecordToConcept,
   persistDesignImage,
   reserveImageCredit,
+  requireAiAccess,
   requireAuthenticatedUser,
   storeImageFromUrl,
   UsageReservationError
@@ -81,6 +82,12 @@ export async function POST(request: Request) {
       preference: routing.effectivePreference
     });
 
+    const auth = await requireAuthenticatedUser(request);
+    if (auth instanceof NextResponse) return auth;
+
+    const accessDenied = requireAiAccess(auth);
+    if (accessDenied) return accessDenied;
+
     if (serverEnv.demoMode && !serverEnv.replicateApiToken) {
       return NextResponse.json({
         image: createDemoEditedConcept({
@@ -95,9 +102,6 @@ export async function POST(request: Request) {
         ...routingMetadata
       });
     }
-
-    const auth = await requireAuthenticatedUser(request);
-    if (auth instanceof NextResponse) return auth;
 
     const rateLimit = requireRateLimit(auth.user.id, "/api/edit-design", 5);
     if (rateLimit) return rateLimit;

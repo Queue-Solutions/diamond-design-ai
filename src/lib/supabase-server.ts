@@ -119,6 +119,21 @@ export async function requireAuthenticatedUser(request: Request): Promise<Authen
   };
 }
 
+export function requireAiAccess(context: AuthenticatedUserContext): NextResponse | null {
+  if (!context.profile.is_blocked) {
+    return null;
+  }
+
+  return NextResponse.json(
+    {
+      error: "Your account is currently blocked from using AI features.",
+      code: "USER_BLOCKED",
+      remainingCredits: 0
+    },
+    { status: 403 }
+  );
+}
+
 export async function getUsageSummary(userId: string, profile: UserProfile): Promise<UsageSummary> {
   const admin = createAdminSupabaseClient();
   if (!admin) {
@@ -167,9 +182,8 @@ export async function getUsageSummary(userId: string, profile: UserProfile): Pro
 }
 
 export async function requireImageCredits(context: AuthenticatedUserContext): Promise<UsageSummary | NextResponse> {
-  if (context.profile.is_blocked) {
-    return NextResponse.json({ error: "Your account is currently blocked from AI generation.", remainingCredits: 0 }, { status: 403 });
-  }
+  const accessDenied = requireAiAccess(context);
+  if (accessDenied) return accessDenied;
 
   const usage = await getUsageSummary(context.user.id, context.profile);
   if (usage.dailyRemaining <= 0 || usage.monthlyRemaining <= 0) {
