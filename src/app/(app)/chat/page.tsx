@@ -722,23 +722,23 @@ export default function ChatPage() {
     setUploadError("");
   }
 
-  async function finalizeDesign() {
-    if (!finalizeCandidate || isGeneratingBrief) return;
+  async function finalizeDesign(conceptToFinalize = finalizeCandidate) {
+    if (!conceptToFinalize || isGeneratingBrief) return;
 
     setError("");
-    setFinalizedConceptId(finalizeCandidate.id);
-    setSelectedConceptId(finalizeCandidate.id);
+    setFinalizedConceptId(conceptToFinalize.id);
+    setSelectedConceptId(conceptToFinalize.id);
     setFinalizeCandidate(null);
     setIsGeneratingBrief(true);
 
     try {
-      const nextReferenceId = `DIA-${new Date().getFullYear()}-${finalizeCandidate.rootId.slice(0, 8).toUpperCase()}`;
+      const nextReferenceId = `DIA-${new Date().getFullYear()}-${conceptToFinalize.rootId.slice(0, 8).toUpperCase()}`;
       const response = await fetch("/api/design-brief", {
         method: "POST",
         headers: { "Content-Type": "application/json", ...(await authHeaders()) },
         body: JSON.stringify({
           designProfile,
-          finalizedConcept: finalizeCandidate,
+          finalizedConcept: conceptToFinalize,
           concepts: sortedConcepts,
           referenceId: nextReferenceId,
           sessionId
@@ -910,12 +910,27 @@ export default function ChatPage() {
       <PreviewDialog
         concept={previewConcept}
         concepts={sortedConcepts}
+        isPreparingHandoff={isGeneratingBrief}
         onOpenChange={(open) => {
           if (!open) setPreviewConcept(null);
         }}
         onNavigate={setPreviewConcept}
         onDownload={(concept) => {
           void downloadImageFile(concept).catch(() => setError("Image download could not be completed. Please try again."));
+        }}
+        onSendToShop={(concept) => {
+          setPreviewConcept(null);
+          if (concept.id === finalizedConceptId && designBrief) {
+            setSelectedConceptId(concept.id);
+            return;
+          }
+          void finalizeDesign(concept);
+        }}
+        onEdit={(concept) => {
+          setSelectedConceptId(concept.id);
+          setPreviewConcept(null);
+          setEditInstruction("");
+          setSelectedConcept(concept);
         }}
         onImageError={() => void refreshSessionImages()}
       />
@@ -2104,16 +2119,22 @@ function EditConceptDialog({
 function PreviewDialog({
   concept,
   concepts,
+  isPreparingHandoff,
   onOpenChange,
   onNavigate,
   onDownload,
+  onSendToShop,
+  onEdit,
   onImageError
 }: {
   concept: GeneratedConcept | null;
   concepts: GeneratedConcept[];
+  isPreparingHandoff: boolean;
   onOpenChange: (open: boolean) => void;
   onNavigate: (concept: GeneratedConcept) => void;
   onDownload: (concept: GeneratedConcept) => void;
+  onSendToShop: (concept: GeneratedConcept) => void;
+  onEdit: (concept: GeneratedConcept) => void;
   onImageError: () => void;
 }) {
   const index = concept ? concepts.findIndex((item) => item.id === concept.id) : -1;
@@ -2121,19 +2142,36 @@ function PreviewDialog({
 
   return (
     <Dialog open={Boolean(concept)} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-6xl border-white/10 bg-black/90 p-0">
+      <DialogContent showCloseButton={false} className="max-w-6xl border-white/10 bg-black/90 p-0">
         {concept ? (
           <div className="relative min-h-[80vh] overflow-hidden rounded-3xl">
             <div className="absolute inset-0 bg-diamond-radial opacity-60" />
             <div className="relative flex min-h-[80vh] flex-col">
-              <div className="flex items-center justify-between gap-3 border-b bg-black/35 p-4 backdrop-blur-xl">
+              <div className="flex flex-col gap-4 border-b bg-black/35 p-4 backdrop-blur-xl sm:flex-row sm:items-center sm:justify-between">
                 <div>
                   <p className="text-xs uppercase tracking-[0.18em] text-diamond-champagne/70">Private preview</p>
                   <h2 className="font-display mt-1 text-2xl font-medium text-white">
                     {concept.variationName}
                   </h2>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button
+                    size="sm"
+                    onClick={() => onSendToShop(concept)}
+                    disabled={isPreparingHandoff}
+                  >
+                    {isPreparingHandoff ? <Sparkles className="h-4 w-4 animate-pulse" /> : <Store className="h-4 w-4" />}
+                    {isPreparingHandoff ? "Preparing..." : "Send to shop"}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => onEdit(concept)}
+                    disabled={isPreparingHandoff}
+                  >
+                    <Wand2 className="h-4 w-4" />
+                    Edit
+                  </Button>
                   <Button size="icon" variant="ghost" aria-label="Download image" onClick={() => onDownload(concept)}>
                     <Download className="h-5 w-5" />
                   </Button>
