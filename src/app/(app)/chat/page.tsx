@@ -765,6 +765,41 @@ export default function ChatPage() {
     setEditInstruction("");
   }
 
+  function reuseConceptInAtelier(concept: GeneratedConcept) {
+    const id = crypto.randomUUID();
+    const createdAt = Date.now();
+    const referenceConcept: GeneratedConcept = {
+      ...concept,
+      id,
+      version: 1,
+      parentId: null,
+      rootId: id,
+      createdAt: new Date(createdAt).toISOString()
+    };
+
+    setPreviewConcept(null);
+    setGeneratedConcepts((current) => [...current, referenceConcept]);
+    setSelectedConceptId(referenceConcept.id);
+    setDesignBrief(null);
+    setFinalizedConceptId("");
+    setMessages((current) => [
+      ...current,
+      {
+        id: crypto.randomUUID(),
+        role: "assistant",
+        content: `I've brought "${concept.variationName}" back into the atelier as the active reference. Tell me what you would like to keep, change, or refine from it.`,
+        createdAt: new Date(createdAt + 1).toISOString()
+      }
+    ]);
+    setDesignProfile((current) =>
+      normalizeDesignProfile({
+        ...current,
+        notes: [...current.notes, `Atelier reference: ${concept.variationName}`],
+        readyForGeneration: current.readyForGeneration
+      })
+    );
+  }
+
   function resetSession() {
     clearDiamondSession(user?.id);
     setMessages([
@@ -927,10 +962,7 @@ export default function ChatPage() {
           void finalizeDesign(concept);
         }}
         onEdit={(concept) => {
-          setSelectedConceptId(concept.id);
-          setPreviewConcept(null);
-          setEditInstruction("");
-          setSelectedConcept(concept);
+          reuseConceptInAtelier(concept);
         }}
         onImageError={() => void refreshSessionImages()}
       />
