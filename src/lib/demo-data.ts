@@ -36,7 +36,36 @@ export function createDemoConcepts(): GeneratedConcept[] {
   ];
 }
 
-export function createDemoBrief(profile: DesignProfile, finalizedConcept: GeneratedConcept, referenceId: string): DesignBrief {
+export function createDemoBrief(
+  profile: DesignProfile,
+  finalizedConcept: GeneratedConcept,
+  referenceId: string,
+  language: "en" | "ar" = "en"
+): DesignBrief {
+  if (language === "ar") {
+    return {
+      referenceId,
+      sessionSummary: "ملخص تجريبي: تم اختيار تصور فاخر من الألماس لمراجعته داخل الورشة.",
+      customerDesignSummary: "تصور مختار لمجوهرات ألماس جرى إعداده كمرجع بصري للنقاش مع الصائغ.",
+      jewelryType: profile.jewelryType || "غير محدد",
+      occasion: profile.occasion || "غير محدد",
+      recipient: profile.recipient || "غير محدد",
+      style: profile.style || "غير محدد",
+      metal: profile.metal || "غير محدد",
+      diamondShape: profile.diamondShape || "غير محدد",
+      setting: profile.setting || "غير محدد",
+      bandStyle: profile.bandStyle || "غير محدد",
+      customerNotes: profile.notes,
+      designEvolution: `التصور المختار هو ${finalizedConcept.variationName}.`,
+      finalAiDescription: finalizedConcept.description || "تصور ألماس فاخر للمراجعة.",
+      workshopNotes: "تُراجع النسب ومواصفات الأحجار وإمكانية تنفيذ الترصيع والراحة وطريقة الإنتاج.",
+      recommendedDiscussionPoints: ["حجم الحجر ودرجته", "اختيار المعدن", "متانة الترصيع", "إمكانية التصنيع"],
+      revisionHistorySummary: `الإصدار النهائي المختار: ${finalizedConcept.version}.`,
+      disclaimer:
+        "هذا التصور مخصص للإلهام البصري والمراجعة داخل الورشة. يجب أن يتولى صائغ محترف جميع القرارات الهندسية وقرارات التصنيع النهائية."
+    };
+  }
+
   return {
     referenceId,
     sessionSummary:

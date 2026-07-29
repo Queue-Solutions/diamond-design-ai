@@ -5,7 +5,7 @@ import { ApiInputError, handleApiError, methodNotAllowed, parseJsonBody } from "
 import { diamondConsultantSystemPrompt } from "@/lib/diamond-consultant-prompt";
 import { normalizeDesignProfile, normalizeStage } from "@/lib/design-profile";
 import { requireRateLimit } from "@/lib/rate-limit";
-import { logUsageEvent, requireAiAccess, requireAuthenticatedUser } from "@/lib/supabase-server";
+import { logUsageEvent, requireAuthenticatedUser, requireImageCredits } from "@/lib/supabase-server";
 import { MissingOpenAiApiKeyError, OpenAiLlmProvider } from "@/services/llm";
 import type { ChatAction, ChatApiRequest, ChatApiResponse, ChatImageContext, ChatMessage } from "@/types/design";
 
@@ -27,8 +27,8 @@ export async function POST(request: Request) {
     const auth = await requireAuthenticatedUser(request);
     if (auth instanceof NextResponse) return auth;
 
-    const accessDenied = requireAiAccess(auth);
-    if (accessDenied) return accessDenied;
+    const usageAccess = await requireImageCredits(auth);
+    if (usageAccess instanceof NextResponse) return usageAccess;
 
     if (serverEnv.demoMode && !serverEnv.openaiApiKey) {
       return NextResponse.json(createDemoChatResponse(body.designProfile));

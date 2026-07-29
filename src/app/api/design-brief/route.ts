@@ -24,6 +24,7 @@ type DesignBriefBody = {
   concepts?: GeneratedConcept[];
   referenceId?: string;
   sessionId?: string;
+  language?: "en" | "ar";
 };
 
 export async function POST(request: Request) {
@@ -37,6 +38,7 @@ export async function POST(request: Request) {
     const referenceId = body.referenceId?.trim() || createReferenceId();
     const profile = normalizeDesignProfile(body.designProfile);
     const concepts = Array.isArray(body.concepts) ? body.concepts : [body.finalizedConcept];
+    const language = body.language === "ar" ? "ar" : "en";
 
     const auth = await requireAuthenticatedUser(request);
     if (auth instanceof NextResponse) return auth;
@@ -45,7 +47,7 @@ export async function POST(request: Request) {
     if (accessDenied) return accessDenied;
 
     if (serverEnv.demoMode && !serverEnv.openaiApiKey) {
-      return NextResponse.json({ brief: createDemoBrief(profile, body.finalizedConcept, referenceId), demoMode: true });
+      return NextResponse.json({ brief: createDemoBrief(profile, body.finalizedConcept, referenceId, language), demoMode: true });
     }
 
     const rateLimit = requireRateLimit(auth.user.id, "/api/design-brief", 10);
@@ -69,7 +71,9 @@ export async function POST(request: Request) {
           {
             role: "system",
             content:
-              "You write concise, premium diamond jewelry design briefs for workshop handoff. Return only valid JSON."
+              language === "ar"
+                ? "أنت تكتب ملخصات عربية موجزة وراقية لتسليم تصاميم مجوهرات الألماس إلى الورشة. أعد JSON صالحاً فقط، واكتب جميع القيم المقروءة بالعربية."
+                : "You write concise, premium diamond jewelry design briefs for workshop handoff. Return only valid JSON."
           },
           {
             role: "user",
@@ -77,7 +81,8 @@ export async function POST(request: Request) {
               profile,
               finalizedConcept: body.finalizedConcept,
               concepts,
-              referenceId
+              referenceId,
+              language
             })
           }
         ]
@@ -100,7 +105,7 @@ export async function POST(request: Request) {
       throw error;
     }
 
-    const brief = normalizeBrief(JSON.parse(completion.content), referenceId, profile);
+    const brief = normalizeBrief(JSON.parse(completion.content), referenceId, profile, language);
     let finalImageId: string | null = null;
 
     try {
@@ -164,7 +169,12 @@ export function GET() {
   return methodNotAllowed();
 }
 
-function normalizeBrief(input: Partial<DesignBrief>, referenceId: string, profile: DesignProfile): DesignBrief {
+function normalizeBrief(
+  input: Partial<DesignBrief>,
+  referenceId: string,
+  profile: DesignProfile,
+  language: "en" | "ar"
+): DesignBrief {
   return {
     referenceId,
     sessionSummary: text(input.sessionSummary),
@@ -186,7 +196,9 @@ function normalizeBrief(input: Partial<DesignBrief>, referenceId: string, profil
       : [],
     revisionHistorySummary: text(input.revisionHistorySummary),
     disclaimer:
-      "This concept is intended for visual inspiration and workshop review. Final engineering and manufacturing decisions must be made by a professional jeweler."
+      language === "ar"
+        ? "هذا التصور مخصص للإلهام البصري والمراجعة داخل الورشة. يجب أن يتولى صائغ محترف جميع القرارات الهندسية وقرارات التصنيع النهائية."
+        : "This concept is intended for visual inspiration and workshop review. Final engineering and manufacturing decisions must be made by a professional jeweler."
   };
 }
 

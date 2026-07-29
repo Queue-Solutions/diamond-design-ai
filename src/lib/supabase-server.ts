@@ -190,9 +190,9 @@ export async function requireImageCredits(context: AuthenticatedUserContext): Pr
     return NextResponse.json(
       {
         error:
-          usage.dailyRemaining <= 0
-            ? "You've reached today's AI image limit. Please try again tomorrow."
-            : "You've reached this month's AI image limit.",
+          usage.monthlyRemaining <= 0
+            ? "You've reached your monthly generation limit."
+            : "You've reached your daily generation limit. It will reset tomorrow.",
         remainingCredits: 0,
         usage
       },
@@ -589,8 +589,8 @@ export class UsageReservationError extends Error {
 function mapUsageReservationMessage(message?: string) {
   if (!message) return "Image credits could not be reserved.";
   if (message.includes("USER_BLOCKED")) return "Your account is currently blocked from AI generation.";
-  if (message.includes("DAILY_IMAGE_LIMIT_EXCEEDED")) return "You've reached today's AI image limit. Please try again tomorrow.";
-  if (message.includes("MONTHLY_IMAGE_LIMIT_EXCEEDED")) return "You've reached this month's AI image limit.";
+  if (message.includes("DAILY_IMAGE_LIMIT_EXCEEDED")) return "You've reached your daily generation limit. It will reset tomorrow.";
+  if (message.includes("MONTHLY_IMAGE_LIMIT_EXCEEDED")) return "You've reached your monthly generation limit.";
   if (message.includes("PROFILE_NOT_FOUND")) return "Your profile could not be prepared.";
   return "Image credits could not be reserved.";
 }

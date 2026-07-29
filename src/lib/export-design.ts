@@ -5,6 +5,7 @@ type DesignPdfOptions = {
   concept: GeneratedConcept;
   brief: DesignBrief;
   profile: DesignProfile;
+  language?: "en" | "ar";
 };
 
 const pdfArabicFontName = "NotoSansArabic";
@@ -15,8 +16,15 @@ const pdfBodyLineHeight = 13;
 let pdfArabicFontLoadPromise: Promise<void> | null = null;
 
 export async function downloadDesignPdf(options: DesignPdfOptions) {
-  const pdf = await createDesignPdf(options);
-  pdf.save(`${options.brief.referenceId}-design-brief.pdf`);
+  const pdfBlob = await createDesignPdfBlob(options);
+  const link = document.createElement("a");
+  const pdfUrl = URL.createObjectURL(pdfBlob);
+  link.href = pdfUrl;
+  link.download = `${options.brief.referenceId}-design-brief.pdf`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(pdfUrl), 1_000);
 }
 
 export async function printDesignPdf(options: DesignPdfOptions) {
@@ -26,8 +34,7 @@ export async function printDesignPdf(options: DesignPdfOptions) {
   }
 
   try {
-    const pdf = await createDesignPdf(options);
-    const pdfUrl = URL.createObjectURL(pdf.output("blob"));
+    const pdfUrl = URL.createObjectURL(await createDesignPdfBlob(options));
     let printScheduled = false;
     const openPrintDialog = () => {
       if (printScheduled || printWindow.closed) return;
@@ -49,7 +56,20 @@ export async function printDesignPdf(options: DesignPdfOptions) {
   }
 }
 
-async function createDesignPdf({ concept, brief, profile }: DesignPdfOptions) {
+export async function createDesignPdfBlob(options: DesignPdfOptions) {
+  const pdf = await createDesignPdf(options);
+  return pdf.output("blob");
+}
+
+async function createDesignPdf(options: DesignPdfOptions) {
+  if (options.language === "ar") {
+    return createArabicDesignPdf(options);
+  }
+
+  return createEnglishDesignPdf(options);
+}
+
+async function createEnglishDesignPdf({ concept, brief, profile }: DesignPdfOptions) {
   const pdf = new jsPDF({ unit: "pt", format: "a4" });
   if (containsArabic(JSON.stringify({ brief, profile }))) {
     await loadPdfArabicFont();
@@ -114,6 +134,77 @@ async function createDesignPdf({ concept, brief, profile }: DesignPdfOptions) {
   );
   y = addSection(pdf, "Revision History Summary", brief.revisionHistorySummary, y);
   addSection(pdf, "Disclaimer", brief.disclaimer, y);
+
+  return pdf;
+}
+
+async function createArabicDesignPdf({ concept, brief, profile }: DesignPdfOptions) {
+  const pdf = new jsPDF({ unit: "pt", format: "a4" });
+  await loadPdfArabicFont();
+  pdf.setProperties({
+    title: "ملخص تصميم الألماس",
+    subject: `مرجع التصميم ${brief.referenceId}`,
+    creator: "Diamond Design AI Agent"
+  });
+
+  const width = pdf.internal.pageSize.getWidth();
+  const contentWidth = width - pdfMargin * 2;
+  let y = pdfMargin + 22;
+
+  paintPdfPage(pdf);
+  y = writePdfLines(pdf, ["ملخص تصميم الألماس"], pdfMargin, y, contentWidth, 30, 22, [255, 255, 255], true, 700);
+  y += 2;
+  y = writePdfLines(
+    pdf,
+    [`المرجع: ${brief.referenceId}`],
+    pdfMargin,
+    y,
+    contentWidth,
+    16,
+    10,
+    [200, 205, 214],
+    true
+  );
+  y += 18;
+
+  const imageData = await imageToDataUrl(concept.url);
+  const imageSize = 190;
+  const imageX = width - pdfMargin - imageSize;
+  if (imageData) {
+    pdf.addImage(imageData, "PNG", imageX, y, imageSize, imageSize);
+  }
+
+  const profileLines = [
+    ["نوع المجوهرات", brief.jewelryType || profile.jewelryType],
+    ["المعدن", brief.metal || profile.metal],
+    ["شكل الألماس", brief.diamondShape || profile.diamondShape],
+    ["أسلوب الترصيع", brief.setting || profile.setting],
+    ["تصميم السوار أو السلسلة", brief.bandStyle || profile.bandStyle]
+  ];
+  const detailX = pdfMargin;
+  const detailWidth = imageX - pdfMargin - 24;
+  let detailY = y + 12;
+
+  for (const [label, value] of profileLines) {
+    detailY = writePdfLines(pdf, [label], detailX, detailY, detailWidth, 14, 10, [215, 196, 154], true, 700);
+    const lines = splitPdfText(pdf, value || "غير محدد", detailWidth, 9.5, true);
+    detailY = writePdfLines(pdf, lines, detailX, detailY, detailWidth, 12, 9.5, [245, 247, 250], true);
+    detailY += 7;
+  }
+
+  y = Math.max(y + 225, detailY + 12);
+  y = addArabicSection(pdf, "ملخص تصميم العميل", brief.customerDesignSummary, y);
+  y = addArabicSection(pdf, "تطور التصميم", brief.designEvolution, y);
+  y = addArabicSection(pdf, "الوصف النهائي بالذكاء الاصطناعي", brief.finalAiDescription, y);
+  y = addArabicSection(pdf, "ملاحظات الورشة", brief.workshopNotes, y);
+  y = addArabicSection(
+    pdf,
+    "نقاط النقاش المقترحة",
+    brief.recommendedDiscussionPoints.map((point) => `- ${point}`).join("\n"),
+    y
+  );
+  y = addArabicSection(pdf, "ملخص سجل التعديلات", brief.revisionHistorySummary, y);
+  addArabicSection(pdf, "إخلاء المسؤولية", brief.disclaimer, y);
 
   return pdf;
 }
@@ -238,6 +329,44 @@ function addSection(pdf: jsPDF, title: string, text: string, y: number) {
   return y + 22;
 }
 
+function addArabicSection(pdf: jsPDF, title: string, text: string, y: number) {
+  const width = pdf.internal.pageSize.getWidth();
+  const contentWidth = width - pdfMargin * 2;
+  const minimumSectionHeight = 20 + pdfBodyLineHeight * 2;
+
+  if (remainingPdfPageHeight(pdf, y) < minimumSectionHeight) {
+    y = addPdfPage(pdf) + 13;
+  }
+
+  const drawTitle = (continued = false) => {
+    y = writePdfLines(
+      pdf,
+      [continued ? `${title} (تابع)` : title],
+      pdfMargin,
+      y,
+      contentWidth,
+      19,
+      13,
+      [215, 196, 154],
+      true,
+      700
+    );
+  };
+
+  drawTitle();
+  const lines = splitPdfText(pdf, text || "غير محدد", contentWidth, 10, true);
+  for (const line of lines) {
+    if (remainingPdfPageHeight(pdf, y) < pdfBodyLineHeight) {
+      y = addPdfPage(pdf) + 13;
+      drawTitle(true);
+    }
+
+    y = writePdfLines(pdf, [line], pdfMargin, y, contentWidth, pdfBodyLineHeight, 10, [235, 238, 243], true);
+  }
+
+  return y + 16;
+}
+
 function paintPdfPage(pdf: jsPDF) {
   pdf.setFillColor(8, 8, 10);
   pdf.rect(0, 0, pdf.internal.pageSize.getWidth(), pdf.internal.pageSize.getHeight(), "F");
@@ -257,10 +386,10 @@ function setPdfBodyFont(pdf: jsPDF) {
   pdf.setFont("helvetica", "normal");
 }
 
-function splitPdfText(pdf: jsPDF, text: string, maxWidth: number, fontSize: number): string[] {
+function splitPdfText(pdf: jsPDF, text: string, maxWidth: number, fontSize: number, forceRtl = false): string[] {
   return text.split(/\r?\n/).flatMap((paragraph) => {
     if (!paragraph.trim()) return [""];
-    if (containsArabic(paragraph)) {
+    if (forceRtl || containsArabic(paragraph)) {
       return wrapBrowserText(paragraph, maxWidth, fontSize);
     }
     return pdf.splitTextToSize(paragraph, maxWidth) as string[];
@@ -275,11 +404,13 @@ function writePdfLines(
   maxWidth: number,
   lineHeight: number,
   fontSize: number,
-  color: [number, number, number]
+  color: [number, number, number],
+  forceRtl = false,
+  fontWeight = 400
 ) {
   for (const line of lines) {
-    if (containsArabic(line)) {
-      const lineCanvas = renderBrowserTextLine(line, maxWidth, lineHeight, fontSize, color);
+    if (forceRtl || containsArabic(line)) {
+      const lineCanvas = renderBrowserTextLine(line, maxWidth, lineHeight, fontSize, color, forceRtl, fontWeight);
       pdf.addImage(lineCanvas, "PNG", x, y - fontSize, maxWidth, lineHeight, undefined, "FAST");
     } else {
       pdf.text(line, x, y);
@@ -328,7 +459,9 @@ function renderBrowserTextLine(
   maxWidth: number,
   lineHeight: number,
   fontSize: number,
-  color: [number, number, number]
+  color: [number, number, number],
+  forceRtl = false,
+  fontWeight = 400
 ) {
   const scale = 4;
   const canvas = document.createElement("canvas");
@@ -339,13 +472,13 @@ function renderBrowserTextLine(
     throw new Error("Arabic PDF text could not be rendered.");
   }
 
-  const isRtl = isPredominantlyArabic(text);
+  const isRtl = forceRtl || isPredominantlyArabic(text);
   context.scale(scale, scale);
   context.direction = isRtl ? "rtl" : "ltr";
   context.textAlign = isRtl ? "right" : "left";
   context.textBaseline = "alphabetic";
   context.fillStyle = `rgb(${color.join(",")})`;
-  context.font = `400 ${fontSize}px "${pdfArabicFontName}", Arial, sans-serif`;
+  context.font = `${fontWeight} ${fontSize}px "${pdfArabicFontName}", Arial, sans-serif`;
   context.fillText(text, isRtl ? maxWidth : 0, fontSize);
   return canvas;
 }

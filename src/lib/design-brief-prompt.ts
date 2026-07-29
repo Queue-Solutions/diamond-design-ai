@@ -4,18 +4,34 @@ export function buildDesignBriefPrompt({
   profile,
   finalizedConcept,
   concepts,
-  referenceId
+  referenceId,
+  language = "en"
 }: {
   profile: DesignProfile;
   finalizedConcept: GeneratedConcept;
   concepts: GeneratedConcept[];
   referenceId: string;
+  language?: "en" | "ar";
 }) {
+  const arabicOutputInstruction =
+    language === "ar"
+      ? `
+Write every human-readable value in Arabic, including summaries, jewelry attributes, notes, discussion points, revision history, and the disclaimer.
+Translate English source details into natural professional Arabic.
+Keep only technical identifiers such as "${referenceId}" unchanged.
+Use clear Modern Standard Arabic suitable for a jeweler and natural right-to-left reading.
+The disclaimer must be exactly:
+"هذا التصور مخصص للإلهام البصري والمراجعة داخل الورشة. يجب أن يتولى صائغ محترف جميع القرارات الهندسية وقرارات التصنيع النهائية."`
+      : "Write every human-readable value in concise professional English.";
+
   return `
 You are preparing a luxury diamond jewelry workshop handoff document.
 
 This is not CAD, not 3D, not a manufacturing-ready file, and not a production guarantee.
 The brief bridges AI visual inspiration and review by a professional jeweler.
+
+Output language requirements:
+${arabicOutputInstruction}
 
 Return only valid JSON with this exact shape:
 {
@@ -36,7 +52,7 @@ Return only valid JSON with this exact shape:
   "workshopNotes": "",
   "recommendedDiscussionPoints": [],
   "revisionHistorySummary": "",
-  "disclaimer": "This concept is intended for visual inspiration and workshop review. Final engineering and manufacturing decisions must be made by a professional jeweler."
+  "disclaimer": ""
 }
 
 Design profile:

@@ -103,6 +103,7 @@ type UsageState = {
 
 export default function ChatPage() {
   const { user, getAccessToken } = useAuth();
+  const { language, t } = useLanguage();
   const [messages, setMessages] = useState<ChatMessage[]>([initialAssistantMessage]);
   const [designProfile, setDesignProfile] = useState<DesignProfile>(emptyDesignProfile);
   const [stage, setStage] = useState<ConversationStage>("discovery");
@@ -137,6 +138,18 @@ export default function ChatPage() {
   const inspirationLoadedRef = useRef(false);
   const fontLoadedRef = useRef(false);
   const storage = useMemo(() => new BrowserLocalImageStorage(), []);
+  const usageLimitReached = Boolean(usage && (usage.dailyRemaining <= 0 || usage.monthlyRemaining <= 0));
+  const usageLimitMessage = usageLimitReached
+    ? usage?.monthlyRemaining === 0
+      ? t(
+          "You've reached your monthly generation limit.",
+          "لقد وصلت إلى حد الإنشاء الشهري."
+        )
+      : t(
+          "You've reached your daily generation limit. It will reset tomorrow.",
+          "لقد وصلت إلى حد الإنشاء اليومي. سيتم تجديد الرصيد غداً."
+        )
+    : "";
 
   const sortedConcepts = useMemo(
     () =>
@@ -182,6 +195,7 @@ export default function ChatPage() {
     () => requiresArabicJewelryLettering({ designProfile }),
     [designProfile]
   );
+  const handoffLanguage = language === "ar" || arabicLetteringRequired ? "ar" : "en";
   const comparisonConcepts = comparisonIds
     .map((id) => sortedConcepts.find((concept) => concept.id === id))
     .filter((concept): concept is GeneratedConcept => Boolean(concept));
@@ -307,7 +321,11 @@ export default function ChatPage() {
 
   useEffect(() => {
     scrollRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-  }, [generatedConcepts, isGenerating, messages, isSending]);
+  }, [error, generatedConcepts, isGenerating, messages, isSending]);
+
+  useEffect(() => {
+    if (usageLimitMessage) setError(usageLimitMessage);
+  }, [usageLimitMessage]);
 
   useEffect(() => {
     const latestConcept = sortedConcepts[sortedConcepts.length - 1];
@@ -422,6 +440,10 @@ export default function ChatPage() {
   async function sendMessage(content: string) {
     const trimmed = content.trim();
     if (!trimmed || isSending) return;
+    if (usageLimitReached) {
+      setError(usageLimitMessage);
+      return;
+    }
 
     const userMessage: ChatMessage = {
       id: crypto.randomUUID(),
@@ -448,7 +470,8 @@ export default function ChatPage() {
           images: buildChatImageContext(sortedConcepts, selectedConceptId)
         })
       });
-      const payload = (await response.json()) as Partial<ChatApiResponse> & { error?: string };
+      const payload = (await response.json()) as Partial<ChatApiResponse> & { error?: string; usage?: UsageState };
+      if (payload.usage) setUsage(payload.usage);
       if (!response.ok) throw new Error(payload.error ?? "The consultant could not respond. Please try again.");
 
       const updatedProfile = normalizeDesignProfile({
@@ -514,8 +537,8 @@ export default function ChatPage() {
       setError("Sign in to save your designs and generate AI concepts.");
       return;
     }
-    if (usage && (usage.dailyRemaining <= 0 || usage.monthlyRemaining <= 0)) {
-      setError("You've reached today's AI image limit. Please try again tomorrow.");
+    if (usageLimitReached) {
+      setError(usageLimitMessage);
       return;
     }
 
@@ -532,13 +555,26 @@ export default function ChatPage() {
           sessionId
         })
       });
-      const payload = (await response.json()) as { images?: GeneratedConcept[]; error?: string; demoMode?: boolean; sessionId?: string };
+      const payload = (await response.json()) as {
+        images?: GeneratedConcept[];
+        error?: string;
+        demoMode?: boolean;
+        sessionId?: string;
+        usage?: UsageState;
+      };
+      if (payload.usage) setUsage(payload.usage);
+      if (!response.ok && response.status === 429 && !payload.usage) await refreshUsage();
       if (!response.ok) throw new Error(payload.error ?? "The design concepts could not be generated. Please try again.");
       if (!payload.images?.length) throw new Error("No design concepts were returned. Please try again.");
 
-      setGeneratedConcepts((current) => [...current, ...(payload.images ?? [])]);
+      const receivedAt = Date.now();
+      const orderedImages = payload.images.map((image, index) => ({
+        ...image,
+        createdAt: new Date(receivedAt + index).toISOString()
+      }));
+      setGeneratedConcepts((current) => [...current, ...orderedImages]);
       if (payload.sessionId) setSessionId(payload.sessionId);
-      setSelectedConceptId(payload.images[0].id);
+      setSelectedConceptId(orderedImages[0].id);
       setDesignBrief(null);
       setFinalizedConceptId("");
       if (payload.demoMode) {
@@ -567,8 +603,8 @@ export default function ChatPage() {
       setError("Sign in to save your designs and generate AI concepts.");
       return;
     }
-    if (usage && (usage.dailyRemaining <= 0 || usage.monthlyRemaining <= 0)) {
-      setError("You've reached today's AI image limit. Please try again tomorrow.");
+    if (usageLimitReached) {
+      setError(usageLimitMessage);
       return;
     }
 
@@ -596,13 +632,17 @@ export default function ChatPage() {
         error?: string;
         demoMode?: boolean;
         sessionId?: string;
+        usage?: UsageState;
       };
+      if (payload.usage) setUsage(payload.usage);
+      if (!response.ok && response.status === 429 && !payload.usage) await refreshUsage();
       if (!response.ok) throw new Error(payload.error ?? "The edit could not be completed. Please try again.");
       if (!payload.image) throw new Error("No edited image was returned. Please try again.");
 
-      setGeneratedConcepts((current) => [...current, payload.image as GeneratedConcept]);
+      const orderedImage = { ...payload.image, createdAt: new Date().toISOString() };
+      setGeneratedConcepts((current) => [...current, orderedImage]);
       if (payload.sessionId) setSessionId(payload.sessionId);
-      setSelectedConceptId(payload.image.id);
+      setSelectedConceptId(orderedImage.id);
       setDesignProfile(normalizeDesignProfile(payload.updatedDesignProfile));
       setDesignBrief(null);
       setFinalizedConceptId("");
@@ -741,7 +781,8 @@ export default function ChatPage() {
           finalizedConcept: conceptToFinalize,
           concepts: sortedConcepts,
           referenceId: nextReferenceId,
-          sessionId
+          sessionId,
+          language: handoffLanguage
         })
       });
       const payload = (await response.json()) as { brief?: DesignBrief; error?: string; demoMode?: boolean; sessionId?: string };
@@ -840,8 +881,6 @@ export default function ChatPage() {
     <div className="relative min-h-[calc(100vh-5rem)] overflow-x-hidden">
       <div className="pointer-events-none absolute inset-x-0 top-0 h-[34rem] rounded-[3rem] bg-[radial-gradient(circle_at_45%_0%,rgba(215,196,154,0.16),transparent_34rem)]" />
 
-      {error ? <LuxuryAlert message={error} onRetry={() => setError("")} /> : null}
-
       <div className="relative grid min-w-0 gap-6 xl:grid-cols-[minmax(0,1fr)_23rem]">
         <div className="min-w-0 space-y-6">
           <ConversationPanel
@@ -858,6 +897,8 @@ export default function ChatPage() {
             finalizedConceptId={finalizedConceptId}
             revisionUnlockedIds={revisionUnlockedIds}
             usage={usage}
+            error={error}
+            chatDisabled={usageLimitReached}
             stage={stage}
             completion={completion}
             demoMode={isDemoMode}
@@ -879,6 +920,7 @@ export default function ChatPage() {
             onFavorite={toggleFavorite}
             onCompareImage={toggleCompare}
             onImageError={() => void refreshSessionImages()}
+            onDismissError={() => setError("")}
             readyForGeneration={designProfile.readyForGeneration}
             imageModelPreference={designProfile.imageModelPreference}
             arabicLetteringRequired={arabicLetteringRequired}
@@ -910,14 +952,14 @@ export default function ChatPage() {
           onPrepareBrief={(concept) => setFinalizeCandidate(concept)}
           onDownloadPdf={() => {
             if (designBrief && finalizedConcept) {
-              void downloadDesignPdf({ concept: finalizedConcept, brief: designBrief, profile: designProfile }).catch(() =>
+              void downloadDesignPdf({ concept: finalizedConcept, brief: designBrief, profile: designProfile, language: handoffLanguage }).catch(() =>
                 setError("PDF export could not be completed. Please try again.")
               );
             }
           }}
           onPrint={() => {
             if (designBrief && finalizedConcept) {
-              void printDesignPdf({ concept: finalizedConcept, brief: designBrief, profile: designProfile }).catch((printError) =>
+              void printDesignPdf({ concept: finalizedConcept, brief: designBrief, profile: designProfile, language: handoffLanguage }).catch((printError) =>
                 setError(printError instanceof Error ? printError.message : "The printable design brief could not be opened.")
               );
             }
@@ -1005,6 +1047,8 @@ export default function ChatPage() {
 }
 
 function LuxuryAlert({ message, onRetry }: { message: string; onRetry: () => void }) {
+  const { t } = useLanguage();
+
   return (
     <motion.div
       initial={{ opacity: 0, y: -6 }}
@@ -1017,7 +1061,7 @@ function LuxuryAlert({ message, onRetry }: { message: string; onRetry: () => voi
         <p>{message}</p>
       </div>
       <Button variant="secondary" size="sm" onClick={onRetry}>
-        Dismiss
+        {t("Dismiss", "إغلاق")}
       </Button>
     </motion.div>
   );
@@ -1037,6 +1081,8 @@ function ConversationPanel({
   finalizedConceptId,
   revisionUnlockedIds,
   usage,
+  error,
+  chatDisabled,
   stage,
   completion,
   demoMode,
@@ -1055,6 +1101,7 @@ function ConversationPanel({
   onFavorite,
   onCompareImage,
   onImageError,
+  onDismissError,
   readyForGeneration,
   imageModelPreference,
   arabicLetteringRequired,
@@ -1074,6 +1121,8 @@ function ConversationPanel({
   finalizedConceptId: string;
   revisionUnlockedIds: Set<string>;
   usage: UsageState | null;
+  error: string;
+  chatDisabled: boolean;
   stage: ConversationStage;
   completion: number;
   demoMode: boolean;
@@ -1092,6 +1141,7 @@ function ConversationPanel({
   onFavorite: (id: string) => void;
   onCompareImage: (id: string) => void;
   onImageError: () => void;
+  onDismissError: () => void;
   readyForGeneration: boolean;
   imageModelPreference: ImageModelPreference;
   arabicLetteringRequired: boolean;
@@ -1212,6 +1262,7 @@ function ConversationPanel({
             </AnimatePresence>
             {isSending ? <TypingIndicator /> : null}
             {isGenerating || isEditing ? <ImageGeneratingBubble label={isEditing ? "Editing the selected image..." : "Creating one diamond image..."} /> : null}
+            {error ? <LuxuryAlert message={error} onRetry={onDismissError} /> : null}
             <div ref={scrollRef} />
           </div>
 
@@ -1222,7 +1273,7 @@ function ConversationPanel({
                 type="button"
                 variant="ghost"
                 size="sm"
-                disabled={isSending}
+                disabled={isSending || chatDisabled}
                 className="max-w-full whitespace-normal break-words rounded-full bg-white/[0.025] px-4 py-2 text-left leading-5 shadow-[inset_0_0_0_1px_rgba(215,196,154,0.07)]"
                 onClick={() => onSuggestion(action)}
               >
@@ -1239,12 +1290,12 @@ function ConversationPanel({
               <input
                 value={input}
                 onChange={(event) => onInputChange(event.target.value)}
-                disabled={isSending}
+                disabled={isSending || chatDisabled}
                 className="h-11 min-w-0 flex-1 bg-transparent px-2 text-sm outline-none placeholder:text-muted-foreground focus-visible:shadow-none disabled:opacity-60"
                 placeholder={t("Describe your dream jewelry...", "صف المجوهرات التي تتخيلها...")}
                 aria-label="Message the diamond consultant"
               />
-              <Button size="icon" aria-label="Send message" disabled={isSending || !input.trim()}>
+              <Button size="icon" aria-label="Send message" disabled={isSending || chatDisabled || !input.trim()}>
                 {isSending ? <Sparkles className="h-5 w-5 animate-pulse" /> : <SendHorizontal className="h-5 w-5" />}
               </Button>
             </div>
