@@ -4,8 +4,6 @@ import type { DesignBrief, DesignProfile, GeneratedConcept } from "@/types/desig
 type DesignPdfOptions = {
   concept: GeneratedConcept;
   brief: DesignBrief;
-  profile: DesignProfile;
-  language?: "en" | "ar";
 };
 
 const pdfArabicFontName = "NotoSansArabic";
@@ -20,15 +18,15 @@ export async function downloadDesignPdf(options: DesignPdfOptions) {
   const link = document.createElement("a");
   const pdfUrl = URL.createObjectURL(pdfBlob);
   link.href = pdfUrl;
-  link.download = `${options.brief.referenceId}-design-brief.pdf`;
+  link.download = `${options.brief.referenceId}-ملخص-التصميم.pdf`;
   document.body.appendChild(link);
   link.click();
   link.remove();
   window.setTimeout(() => URL.revokeObjectURL(pdfUrl), 1_000);
 }
 
-export async function printDesignPdf(options: DesignPdfOptions) {
-  const printWindow = window.open("", "_blank");
+export async function printDesignPdf(options: DesignPdfOptions, existingPrintWindow?: Window | null) {
+  const printWindow = existingPrintWindow ?? window.open("", "_blank");
   if (!printWindow) {
     throw new Error("Allow pop-ups to open the printable design brief.");
   }
@@ -62,89 +60,16 @@ export async function createDesignPdfBlob(options: DesignPdfOptions) {
 }
 
 async function createDesignPdf(options: DesignPdfOptions) {
-  if (options.language === "ar") {
-    return createArabicDesignPdf(options);
-  }
-
-  return createEnglishDesignPdf(options);
+  return createArabicDesignPdf(options);
 }
 
-async function createEnglishDesignPdf({ concept, brief, profile }: DesignPdfOptions) {
-  const pdf = new jsPDF({ unit: "pt", format: "a4" });
-  if (containsArabic(JSON.stringify({ brief, profile }))) {
-    await loadPdfArabicFont();
-  }
-
-  const width = pdf.internal.pageSize.getWidth();
-  let y = pdfMargin;
-
-  paintPdfPage(pdf);
-  pdf.setTextColor(255, 255, 255);
-  pdf.setFont("helvetica", "bold");
-  pdf.setFontSize(22);
-  pdf.text("Diamond Design Brief", pdfMargin, y);
-  y += 24;
-  pdf.setFont("helvetica", "normal");
-  pdf.setFontSize(10);
-  pdf.setTextColor(200, 205, 214);
-  pdf.text(`Reference ${brief.referenceId}`, pdfMargin, y);
-  y += 28;
-
-  const imageData = await imageToDataUrl(concept.url);
-  if (imageData) {
-    pdf.addImage(imageData, "PNG", pdfMargin, y, 190, 190);
-  }
-
-  const profileLines = [
-    ["Jewelry Type", brief.jewelryType || profile.jewelryType],
-    ["Metal", brief.metal || profile.metal],
-    ["Diamond Shape", brief.diamondShape || profile.diamondShape],
-    ["Setting", brief.setting || profile.setting],
-    ["Band Style", brief.bandStyle || profile.bandStyle]
-  ];
-
-  const detailX = pdfMargin + 220;
-  const detailWidth = width - pdfMargin - detailX;
-  let detailY = y + 12;
-  for (const [label, value] of profileLines) {
-    pdf.setFont("helvetica", "bold");
-    pdf.setFontSize(10);
-    pdf.setTextColor(215, 196, 154);
-    pdf.text(label, detailX, detailY);
-    detailY += 14;
-
-    setPdfBodyFont(pdf);
-    pdf.setFontSize(9.5);
-    pdf.setTextColor(245, 247, 250);
-    const lines = splitPdfText(pdf, value || "Not specified", detailWidth, 9.5);
-    detailY = writePdfLines(pdf, lines, detailX, detailY, detailWidth, 11.5, 9.5, [245, 247, 250]);
-    detailY += 8;
-  }
-
-  y = Math.max(y + 225, detailY + 12);
-  y = addSection(pdf, "Customer Design Summary", brief.customerDesignSummary, y);
-  y = addSection(pdf, "Design Evolution", brief.designEvolution, y);
-  y = addSection(pdf, "Final AI Description", brief.finalAiDescription, y);
-  y = addSection(pdf, "Workshop Notes", brief.workshopNotes, y);
-  y = addSection(
-    pdf,
-    "Recommended Discussion Points",
-    brief.recommendedDiscussionPoints.map((point) => `- ${point}`).join("\n"),
-    y
-  );
-  y = addSection(pdf, "Revision History Summary", brief.revisionHistorySummary, y);
-  addSection(pdf, "Disclaimer", brief.disclaimer, y);
-
-  return pdf;
-}
-
-async function createArabicDesignPdf({ concept, brief, profile }: DesignPdfOptions) {
+async function createArabicDesignPdf({ concept, brief }: DesignPdfOptions) {
   const pdf = new jsPDF({ unit: "pt", format: "a4" });
   await loadPdfArabicFont();
   pdf.setProperties({
     title: "ملخص تصميم الألماس",
     subject: `مرجع التصميم ${brief.referenceId}`,
-    creator: "Diamond Design AI Agent"
+    creator: "وكيل تصميم الألماس"
   });
 
   const width = pdf.internal.pageSize.getWidth();
@@ -175,11 +100,11 @@ async function createArabicDesignPdf({ concept, brief, profile }: DesignPdfOptio
   }
 
   const profileLines = [
-    ["نوع المجوهرات", brief.jewelryType || profile.jewelryType],
-    ["المعدن", brief.metal || profile.metal],
-    ["شكل الألماس", brief.diamondShape || profile.diamondShape],
-    ["أسلوب الترصيع", brief.setting || profile.setting],
-    ["تصميم السوار أو السلسلة", brief.bandStyle || profile.bandStyle]
+    ["نوع المجوهرات", brief.jewelryType || "غير محدد"],
+    ["المعدن", brief.metal || "غير محدد"],
+    ["شكل الألماس", brief.diamondShape || "غير محدد"],
+    ["أسلوب الترصيع", brief.setting || "غير محدد"],
+    ["تصميم السوار أو السلسلة", brief.bandStyle || "غير محدد"]
   ];
   const detailX = pdfMargin;
   const detailWidth = imageX - pdfMargin - 24;
@@ -291,44 +216,6 @@ export function createBriefText(brief: DesignBrief, concept: GeneratedConcept) {
   ].join("\n");
 }
 
-function addSection(pdf: jsPDF, title: string, text: string, y: number) {
-  const width = pdf.internal.pageSize.getWidth();
-  const contentWidth = width - pdfMargin * 2;
-  const minimumSectionHeight = 18 + pdfBodyLineHeight * 2;
-
-  if (remainingPdfPageHeight(pdf, y) < minimumSectionHeight) {
-    y = addPdfPage(pdf);
-  }
-
-  const drawTitle = (continued = false) => {
-    pdf.setFont("helvetica", "bold");
-    pdf.setFontSize(13);
-    pdf.setTextColor(215, 196, 154);
-    pdf.text(continued ? `${title} (continued)` : title, pdfMargin, y);
-    y += 18;
-  };
-
-  drawTitle();
-  setPdfBodyFont(pdf);
-  pdf.setFontSize(10);
-  pdf.setTextColor(235, 238, 243);
-
-  const lines = splitPdfText(pdf, text || "Not specified", contentWidth, 10);
-  for (const line of lines) {
-    if (remainingPdfPageHeight(pdf, y) < pdfBodyLineHeight) {
-      y = addPdfPage(pdf);
-      drawTitle(true);
-      setPdfBodyFont(pdf);
-      pdf.setFontSize(10);
-      pdf.setTextColor(235, 238, 243);
-    }
-
-    y = writePdfLines(pdf, [line], pdfMargin, y, contentWidth, pdfBodyLineHeight, 10, [235, 238, 243]);
-  }
-
-  return y + 22;
-}
-
 function addArabicSection(pdf: jsPDF, title: string, text: string, y: number) {
   const width = pdf.internal.pageSize.getWidth();
   const contentWidth = width - pdfMargin * 2;
@@ -380,10 +267,6 @@ function addPdfPage(pdf: jsPDF) {
 
 function remainingPdfPageHeight(pdf: jsPDF, y: number) {
   return pdf.internal.pageSize.getHeight() - pdfBottomMargin - y;
-}
-
-function setPdfBodyFont(pdf: jsPDF) {
-  pdf.setFont("helvetica", "normal");
 }
 
 function splitPdfText(pdf: jsPDF, text: string, maxWidth: number, fontSize: number, forceRtl = false): string[] {

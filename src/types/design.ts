@@ -77,6 +77,7 @@ export type GeneratedConcept = {
 
 export type DesignBrief = {
   referenceId: string;
+  sourceConceptId?: string;
   sessionSummary: string;
   customerDesignSummary: string;
   jewelryType: string;

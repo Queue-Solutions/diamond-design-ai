@@ -14,7 +14,7 @@ import {
 } from "@/lib/supabase-server";
 import { requireRateLimit } from "@/lib/rate-limit";
 import { MissingOpenAiApiKeyError, OpenAiLlmProvider } from "@/services/llm";
-import type { DesignBrief, DesignProfile, GeneratedConcept } from "@/types/design";
+import type { ChatMessage, DesignBrief, DesignProfile, GeneratedConcept } from "@/types/design";
 
 export const runtime = "nodejs";
 
@@ -22,6 +22,7 @@ type DesignBriefBody = {
   designProfile?: DesignProfile;
   finalizedConcept?: GeneratedConcept;
   concepts?: GeneratedConcept[];
+  conversationContext?: ChatMessage[];
   referenceId?: string;
   sessionId?: string;
   language?: "en" | "ar";
@@ -38,7 +39,8 @@ export async function POST(request: Request) {
     const referenceId = body.referenceId?.trim() || createReferenceId();
     const profile = normalizeDesignProfile(body.designProfile);
     const concepts = Array.isArray(body.concepts) ? body.concepts : [body.finalizedConcept];
-    const language = body.language === "ar" ? "ar" : "en";
+    const conversationContext = normalizeConversationContext(body.conversationContext);
+    const language = "ar" as const;
 
     const auth = await requireAuthenticatedUser(request);
     if (auth instanceof NextResponse) return auth;
@@ -60,33 +62,62 @@ export async function POST(request: Request) {
     });
 
     const startedAt = Date.now();
-    let completion;
+    let brief: DesignBrief;
 
     try {
       const provider = new OpenAiLlmProvider();
-      completion = await provider.complete({
+      const messages = [
+        {
+          role: "system" as const,
+          content:
+            "أنت تكتب ملخصات عربية موجزة وراقية لتسليم تصاميم مجوهرات الألماس إلى الورشة. أعد JSON صالحاً فقط، واكتب جميع القيم المقروءة بالعربية."
+        },
+        {
+          role: "user" as const,
+          content: buildDesignBriefPrompt({
+            finalizedConcept: body.finalizedConcept,
+            concepts,
+            conversationContext,
+            referenceId,
+            language
+          })
+        }
+      ];
+      const completion = await provider.complete({
         responseFormat: "json",
         temperature: 0.25,
-        messages: [
-          {
-            role: "system",
-            content:
-              language === "ar"
-                ? "أنت تكتب ملخصات عربية موجزة وراقية لتسليم تصاميم مجوهرات الألماس إلى الورشة. أعد JSON صالحاً فقط، واكتب جميع القيم المقروءة بالعربية."
-                : "You write concise, premium diamond jewelry design briefs for workshop handoff. Return only valid JSON."
-          },
-          {
-            role: "user",
-            content: buildDesignBriefPrompt({
-              profile,
-              finalizedConcept: body.finalizedConcept,
-              concepts,
-              referenceId,
-              language
-            })
-          }
-        ]
+        messages
       });
+      brief = normalizeBrief(JSON.parse(completion.content), referenceId, body.finalizedConcept.id, profile, language);
+
+      if (!isFullyArabicBrief(brief)) {
+        const correctedCompletion = await provider.complete({
+          responseFormat: "json",
+          temperature: 0,
+          messages: [
+            {
+              role: "system",
+              content:
+                "حوّل جميع القيم المقروءة في JSON إلى العربية الفصحى. لا تترك أي كلمة أو اختصار بحروف لاتينية، باستثناء قيمة referenceId التقنية. حافظ على المعنى ومواصفات التصميم وأعد JSON صالحاً فقط."
+            },
+            {
+              role: "user",
+              content: completion.content
+            }
+          ]
+        });
+        brief = normalizeBrief(
+          JSON.parse(correctedCompletion.content),
+          referenceId,
+          body.finalizedConcept.id,
+          profile,
+          language
+        );
+      }
+
+      if (!isFullyArabicBrief(brief)) {
+        throw new Error("The design brief contained non-Arabic workshop copy after correction.");
+      }
     } catch (error) {
       await logUsageEvent({
         userId: auth.user.id,
@@ -105,7 +136,6 @@ export async function POST(request: Request) {
       throw error;
     }
 
-    const brief = normalizeBrief(JSON.parse(completion.content), referenceId, profile, language);
     let finalImageId: string | null = null;
 
     try {
@@ -172,22 +202,32 @@ export function GET() {
 function normalizeBrief(
   input: Partial<DesignBrief>,
   referenceId: string,
+  sourceConceptId: string,
   profile: DesignProfile,
   language: "en" | "ar"
 ): DesignBrief {
+  const attribute = (value: unknown, fallback: string) =>
+    text(value) || (language === "ar" ? "غير محدد" : fallback);
+  const customerNotes = Array.isArray(input.customerNotes)
+    ? input.customerNotes.filter((note): note is string => typeof note === "string")
+    : language === "ar"
+      ? []
+      : profile.notes;
+
   return {
     referenceId,
+    sourceConceptId,
     sessionSummary: text(input.sessionSummary),
     customerDesignSummary: text(input.customerDesignSummary),
-    jewelryType: text(input.jewelryType) || profile.jewelryType,
-    occasion: text(input.occasion) || profile.occasion,
-    recipient: text(input.recipient) || profile.recipient,
-    style: text(input.style) || profile.style,
-    metal: text(input.metal) || profile.metal,
-    diamondShape: text(input.diamondShape) || profile.diamondShape,
-    setting: text(input.setting) || profile.setting,
-    bandStyle: text(input.bandStyle) || profile.bandStyle,
-    customerNotes: Array.isArray(input.customerNotes) ? input.customerNotes.filter((note): note is string => typeof note === "string") : profile.notes,
+    jewelryType: attribute(input.jewelryType, profile.jewelryType),
+    occasion: attribute(input.occasion, profile.occasion),
+    recipient: attribute(input.recipient, profile.recipient),
+    style: attribute(input.style, profile.style),
+    metal: attribute(input.metal, profile.metal),
+    diamondShape: attribute(input.diamondShape, profile.diamondShape),
+    setting: attribute(input.setting, profile.setting),
+    bandStyle: attribute(input.bandStyle, profile.bandStyle),
+    customerNotes,
     designEvolution: text(input.designEvolution),
     finalAiDescription: text(input.finalAiDescription),
     workshopNotes: text(input.workshopNotes),
@@ -204,6 +244,50 @@ function normalizeBrief(
 
 function text(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function isFullyArabicBrief(brief: DesignBrief) {
+  const visibleText = [
+    brief.sessionSummary,
+    brief.customerDesignSummary,
+    brief.jewelryType,
+    brief.occasion,
+    brief.recipient,
+    brief.style,
+    brief.metal,
+    brief.diamondShape,
+    brief.setting,
+    brief.bandStyle,
+    ...brief.customerNotes,
+    brief.designEvolution,
+    brief.finalAiDescription,
+    brief.workshopNotes,
+    ...brief.recommendedDiscussionPoints,
+    brief.revisionHistorySummary,
+    brief.disclaimer
+  ].join(" ");
+
+  return /[\u0600-\u06ff]/.test(visibleText) && !/[a-z]/i.test(visibleText);
+}
+
+function normalizeConversationContext(input: unknown): ChatMessage[] {
+  if (!Array.isArray(input)) return [];
+
+  return input
+    .filter(
+      (message): message is ChatMessage =>
+        typeof message === "object" &&
+        message !== null &&
+        ((message as ChatMessage).role === "user" || (message as ChatMessage).role === "assistant") &&
+        typeof (message as ChatMessage).content === "string"
+    )
+    .map((message) => ({
+      id: message.id,
+      role: message.role,
+      content: message.content.trim().slice(0, 2_000),
+      createdAt: message.createdAt
+    }))
+    .slice(-24);
 }
 
 function createReferenceId() {

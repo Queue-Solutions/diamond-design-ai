@@ -36,6 +36,7 @@ import { LoadingSkeleton } from "@/components/shared/loading-skeleton";
 import { AdvancedImageSettings } from "@/components/chat/advanced-image-settings";
 import { useAuth } from "@/components/auth/auth-provider";
 import { normalizeDesignProfile, statusLabel } from "@/lib/design-profile";
+import { createHandoffContext } from "@/lib/handoff-context";
 import { requiresArabicJewelryLettering } from "@/lib/personalization";
 import { downloadDesignPdf, printDesignPdf } from "@/lib/export-design";
 import { clearDiamondSession, loadDiamondSession, saveDiamondSession } from "@/lib/session-store";
@@ -103,7 +104,7 @@ type UsageState = {
 
 export default function ChatPage() {
   const { user, getAccessToken } = useAuth();
-  const { language, t } = useLanguage();
+  const { t } = useLanguage();
   const [messages, setMessages] = useState<ChatMessage[]>([initialAssistantMessage]);
   const [designProfile, setDesignProfile] = useState<DesignProfile>(emptyDesignProfile);
   const [stage, setStage] = useState<ConversationStage>("discovery");
@@ -195,7 +196,6 @@ export default function ChatPage() {
     () => requiresArabicJewelryLettering({ designProfile }),
     [designProfile]
   );
-  const handoffLanguage = language === "ar" || arabicLetteringRequired ? "ar" : "en";
   const comparisonConcepts = comparisonIds
     .map((id) => sortedConcepts.find((concept) => concept.id === id))
     .filter((concept): concept is GeneratedConcept => Boolean(concept));
@@ -762,7 +762,7 @@ export default function ChatPage() {
     setUploadError("");
   }
 
-  async function finalizeDesign(conceptToFinalize = finalizeCandidate) {
+  async function requestDesignBrief(conceptToFinalize: GeneratedConcept) {
     if (!conceptToFinalize || isGeneratingBrief) return;
 
     setError("");
@@ -772,6 +772,7 @@ export default function ChatPage() {
     setIsGeneratingBrief(true);
 
     try {
+      const handoffContext = createHandoffContext(conceptToFinalize, sortedConcepts, messages);
       const nextReferenceId = `DIA-${new Date().getFullYear()}-${conceptToFinalize.rootId.slice(0, 8).toUpperCase()}`;
       const response = await fetch("/api/design-brief", {
         method: "POST",
@@ -779,25 +780,47 @@ export default function ChatPage() {
         body: JSON.stringify({
           designProfile,
           finalizedConcept: conceptToFinalize,
-          concepts: sortedConcepts,
+          concepts: handoffContext.concepts,
+          conversationContext: handoffContext.conversationContext,
           referenceId: nextReferenceId,
           sessionId,
-          language: handoffLanguage
+          language: "ar"
         })
       });
       const payload = (await response.json()) as { brief?: DesignBrief; error?: string; demoMode?: boolean; sessionId?: string };
       if (!response.ok) throw new Error(payload.error ?? "The design brief could not be generated.");
       if (!payload.brief) throw new Error("No design brief was returned.");
+      if (!isFullyArabicDesignBrief(payload.brief)) {
+        throw new Error("The workshop brief could not be converted fully to Arabic. Please try again.");
+      }
       setDesignBrief(payload.brief);
       if (payload.sessionId) setSessionId(payload.sessionId);
       if (payload.demoMode) {
         setError("Demo mode generated a placeholder workshop brief because OpenAI is not configured.");
       }
+      return payload.brief;
     } catch (briefError) {
       setError(briefError instanceof Error ? briefError.message : "The design brief could not be generated.");
+      return null;
     } finally {
       setIsGeneratingBrief(false);
     }
+  }
+
+  async function finalizeDesign(conceptToFinalize = finalizeCandidate) {
+    if (!conceptToFinalize) return;
+    await requestDesignBrief(conceptToFinalize);
+  }
+
+  async function ensureArabicDesignBrief(concept: GeneratedConcept) {
+    if (
+      designBrief &&
+      designBrief.sourceConceptId === concept.id &&
+      isFullyArabicDesignBrief(designBrief)
+    ) {
+      return designBrief;
+    }
+    return requestDesignBrief(concept);
   }
 
   function createNewRevision(concept: GeneratedConcept) {
@@ -951,17 +974,35 @@ export default function ChatPage() {
           onSelect={setSelectedConceptId}
           onPrepareBrief={(concept) => setFinalizeCandidate(concept)}
           onDownloadPdf={() => {
-            if (designBrief && finalizedConcept) {
-              void downloadDesignPdf({ concept: finalizedConcept, brief: designBrief, profile: designProfile, language: handoffLanguage }).catch(() =>
-                setError("PDF export could not be completed. Please try again.")
-              );
+            if (finalizedConcept) {
+              void (async () => {
+                const arabicBrief = await ensureArabicDesignBrief(finalizedConcept);
+                if (!arabicBrief) return;
+                await downloadDesignPdf({ concept: finalizedConcept, brief: arabicBrief });
+              })().catch(() => setError("PDF export could not be completed. Please try again."));
             }
           }}
           onPrint={() => {
-            if (designBrief && finalizedConcept) {
-              void printDesignPdf({ concept: finalizedConcept, brief: designBrief, profile: designProfile, language: handoffLanguage }).catch((printError) =>
-                setError(printError instanceof Error ? printError.message : "The printable design brief could not be opened.")
-              );
+            if (finalizedConcept) {
+              const printWindow = window.open("", "_blank");
+              if (!printWindow) {
+                setError("Allow pop-ups to open the printable design brief.");
+                return;
+              }
+              void (async () => {
+                const arabicBrief = await ensureArabicDesignBrief(finalizedConcept);
+                if (!arabicBrief) {
+                  printWindow.close();
+                  return;
+                }
+                await printDesignPdf(
+                  { concept: finalizedConcept, brief: arabicBrief },
+                  printWindow
+                );
+              })().catch((printError) => {
+                printWindow.close();
+                setError(printError instanceof Error ? printError.message : "The printable design brief could not be opened.");
+              });
             }
           }}
         />
@@ -2393,6 +2434,30 @@ function safeFileName(value: string) {
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/(^-|-$)/g, "")
     .slice(0, 48) || "diamond-design";
+}
+
+function isFullyArabicDesignBrief(brief: DesignBrief) {
+  const visibleText = [
+    brief.sessionSummary,
+    brief.customerDesignSummary,
+    brief.jewelryType,
+    brief.occasion,
+    brief.recipient,
+    brief.style,
+    brief.metal,
+    brief.diamondShape,
+    brief.setting,
+    brief.bandStyle,
+    ...brief.customerNotes,
+    brief.designEvolution,
+    brief.finalAiDescription,
+    brief.workshopNotes,
+    ...brief.recommendedDiscussionPoints,
+    brief.revisionHistorySummary,
+    brief.disclaimer
+  ].join(" ");
+
+  return /[\u0600-\u06ff]/.test(visibleText) && !/[a-z]/i.test(visibleText);
 }
 
 function isUserProvidedConcept(concept: GeneratedConcept) {
