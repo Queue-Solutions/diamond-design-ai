@@ -8,16 +8,26 @@ import { cn } from "@/lib/utils";
 
 export function Sidebar() {
   const { isArabic, t } = useLanguage();
-  const sidebarNavigationItems = navigationItems.map((item) =>
-    item.href === "/chat"
-      ? {
-          ...item,
-          title: "Chat",
-          titleAr: "المحادثة",
-          icon: MessageCircle
-        }
-      : item
-  );
+  const sidebarNavigationItems = navigationItems.map((item) => {
+    if (item.href === "/chat") {
+      return {
+        ...item,
+        title: "Chat",
+        titleAr: "المحادثة",
+        icon: MessageCircle
+      };
+    }
+
+    if (item.href === "/gallery") {
+      return {
+        ...item,
+        title: "My Wishlist",
+        titleAr: "قائمة أمنياتي"
+      };
+    }
+
+    return item;
+  });
 
   return (
     <aside

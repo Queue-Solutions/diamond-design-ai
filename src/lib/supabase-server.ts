@@ -1,4 +1,6 @@
+import { createHmac } from "node:crypto";
 import { NextResponse } from "next/server";
+import { serverEnv } from "@/config/env";
 import { createAdminSupabaseClient } from "@/services/supabase/admin";
 import { createServerSupabaseClient } from "@/services/supabase/server";
 import {
@@ -35,6 +37,10 @@ export type UsageSummary = {
   monthlyLimit: number;
   dailyRemaining: number;
   monthlyRemaining: number;
+  bonusClaimsUsed: number;
+  bonusClaimsRemaining: number;
+  bonusCreditsGranted: number;
+  canClaimBonus: boolean;
 };
 
 export type ReservedImageCredit = {
@@ -61,6 +67,11 @@ export type PersistedImageRecord = {
 
 const imageCreditEvents = ["image_generation", "image_edit"];
 const activeUsageStatuses = ["reserved", "succeeded"];
+const bonusClaimEventType = "upload";
+const bonusClaimProvider = "system_bonus";
+const bonusClaimModel = "monthly_image_credits";
+const bonusCreditsPerClaim = 2;
+const monthlyBonusClaimLimit = 2;
 
 export function getBearerToken(request: Request) {
   const header = request.headers.get("authorization") ?? "";
@@ -145,7 +156,8 @@ export async function getUsageSummary(userId: string, profile: UserProfile): Pro
   startOfDay.setHours(0, 0, 0, 0);
   const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
 
-  const [daily, monthly] = await Promise.all([
+  const monthKey = formatMonthKey(now);
+  const [daily, monthly, bonusClaims] = await Promise.all([
     admin
       .from("usage_events")
       .select("units")
@@ -159,25 +171,43 @@ export async function getUsageSummary(userId: string, profile: UserProfile): Pro
       .eq("user_id", userId)
       .in("event_type", imageCreditEvents)
       .in("status", activeUsageStatuses)
+      .gte("created_at", startOfMonth.toISOString()),
+    admin
+      .from("usage_events")
+      .select("id,metadata")
+      .eq("user_id", userId)
+      .eq("event_type", bonusClaimEventType)
+      .eq("provider", bonusClaimProvider)
+      .eq("model", bonusClaimModel)
+      .eq("status", "succeeded")
       .gte("created_at", startOfMonth.toISOString())
   ]);
 
-  if (daily.error || monthly.error) {
+  if (daily.error || monthly.error || bonusClaims.error) {
     throw new Error("Usage could not be calculated.");
   }
 
   const dailyUsed = sumUnits(daily.data);
   const monthlyUsed = sumUnits(monthly.data);
-  const dailyRemaining = Math.max(0, profile.daily_image_limit - dailyUsed);
-  const monthlyRemaining = Math.max(0, profile.monthly_image_limit - monthlyUsed);
+  const bonusClaimsUsed = countValidBonusClaims(bonusClaims.data, userId, monthKey);
+  const bonusClaimsRemaining = Math.max(0, monthlyBonusClaimLimit - bonusClaimsUsed);
+  const bonusCreditsGranted = bonusClaimsUsed * bonusCreditsPerClaim;
+  const dailyLimit = profile.daily_image_limit + bonusCreditsGranted;
+  const monthlyLimit = profile.monthly_image_limit + bonusCreditsGranted;
+  const dailyRemaining = Math.max(0, dailyLimit - dailyUsed);
+  const monthlyRemaining = Math.max(0, monthlyLimit - monthlyUsed);
 
   return {
     dailyUsed,
     monthlyUsed,
-    dailyLimit: profile.daily_image_limit,
-    monthlyLimit: profile.monthly_image_limit,
+    dailyLimit,
+    monthlyLimit,
     dailyRemaining,
-    monthlyRemaining
+    monthlyRemaining,
+    bonusClaimsUsed,
+    bonusClaimsRemaining,
+    bonusCreditsGranted,
+    canClaimBonus: bonusClaimsRemaining > 0 && (dailyRemaining <= 0 || monthlyRemaining <= 0)
   };
 }
 
@@ -201,6 +231,68 @@ export async function requireImageCredits(context: AuthenticatedUserContext): Pr
   }
 
   return usage;
+}
+
+export async function claimBonusImageCredits(context: AuthenticatedUserContext): Promise<UsageSummary> {
+  const admin = createAdminSupabaseClient();
+  if (!admin) {
+    throw new Error("Supabase admin client is not configured.");
+  }
+
+  const monthKey = formatMonthKey(new Date());
+
+  for (let attempt = 0; attempt < monthlyBonusClaimLimit + 1; attempt += 1) {
+    const usage = await getUsageSummary(context.user.id, context.profile);
+
+    if (usage.dailyRemaining > 0 && usage.monthlyRemaining > 0) {
+      throw new BonusCreditClaimError(
+        "Bonus credits become available when your daily or monthly image credits reach zero.",
+        "BONUS_NOT_AVAILABLE"
+      );
+    }
+
+    if (usage.bonusClaimsRemaining <= 0) {
+      throw new BonusCreditClaimError(
+        "You've already used both bonus credit claims for this month.",
+        "MONTHLY_BONUS_LIMIT_REACHED"
+      );
+    }
+
+    const claimNumber = usage.bonusClaimsUsed + 1;
+    const claimId = signedUsageId(`bonus-claim:${context.user.id}:${monthKey}:${claimNumber}`);
+    const metadata = createBonusClaimMetadata(context.user.id, monthKey, claimNumber);
+    const { error } = await admin.from("usage_events").insert({
+      id: claimId,
+      user_id: context.user.id,
+      session_id: null,
+      design_image_id: null,
+      event_type: bonusClaimEventType,
+      provider: bonusClaimProvider,
+      model: bonusClaimModel,
+      units: 0,
+      estimated_cost: 0,
+      status: "succeeded",
+      metadata
+    });
+
+    if (!error) {
+      return getUsageSummary(context.user.id, context.profile);
+    }
+
+    if (error.code !== "23505") {
+      throw new Error("Bonus image credits could not be granted.");
+    }
+  }
+
+  const usage = await getUsageSummary(context.user.id, context.profile);
+  if (usage.bonusClaimsRemaining <= 0) {
+    throw new BonusCreditClaimError(
+      "You've already used both bonus credit claims for this month.",
+      "MONTHLY_BONUS_LIMIT_REACHED"
+    );
+  }
+
+  throw new Error("Bonus image credits could not be granted.");
 }
 
 export async function reserveImageCredit({
@@ -242,6 +334,21 @@ export async function reserveImageCredit({
     }>();
 
   if (error || !data) {
+    if (
+      error?.message.includes("DAILY_IMAGE_LIMIT_EXCEEDED") ||
+      error?.message.includes("MONTHLY_IMAGE_LIMIT_EXCEEDED")
+    ) {
+      return reserveBonusImageCredit({
+        userId,
+        sessionId,
+        eventType,
+        provider,
+        model,
+        estimatedCost,
+        metadata
+      });
+    }
+
     throw new UsageReservationError(mapUsageReservationMessage(error?.message), error?.message ?? "USAGE_RESERVATION_FAILED");
   }
 
@@ -250,6 +357,107 @@ export async function reserveImageCredit({
     dailyRemaining: data.daily_remaining,
     monthlyRemaining: data.monthly_remaining
   };
+}
+
+async function reserveBonusImageCredit({
+  userId,
+  sessionId,
+  eventType,
+  provider,
+  model,
+  estimatedCost,
+  metadata
+}: {
+  userId: string;
+  sessionId: string;
+  eventType: "image_generation" | "image_edit";
+  provider: string;
+  model: string;
+  estimatedCost: number;
+  metadata?: Record<string, unknown>;
+}): Promise<ReservedImageCredit> {
+  const admin = createAdminSupabaseClient();
+  if (!admin) {
+    throw new Error("Supabase admin client is not configured.");
+  }
+
+  const { data: profile, error: profileError } = await admin
+    .from("profiles")
+    .select("*")
+    .eq("id", userId)
+    .single<UserProfile>();
+
+  if (profileError || !profile) {
+    throw new UsageReservationError("Your profile could not be prepared.", "PROFILE_NOT_FOUND");
+  }
+  if (profile.is_blocked) {
+    throw new UsageReservationError("Your account is currently blocked from AI generation.", "USER_BLOCKED");
+  }
+
+  const maxAttempts = monthlyBonusClaimLimit * bonusCreditsPerClaim + 2;
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    const usage = await getUsageSummary(userId, profile);
+    if (usage.dailyRemaining <= 0 || usage.monthlyRemaining <= 0) {
+      const code = usage.monthlyRemaining <= 0 ? "MONTHLY_IMAGE_LIMIT_EXCEEDED" : "DAILY_IMAGE_LIMIT_EXCEEDED";
+      throw new UsageReservationError(mapUsageReservationMessage(code), code);
+    }
+
+    const monthKey = formatMonthKey(new Date());
+    const monthlyOrdinal = usage.monthlyUsed + 1;
+    const usageEventId = signedUsageId(`bonus-reservation:${userId}:${monthKey}:${monthlyOrdinal}`);
+    const reservation = {
+      user_id: userId,
+      session_id: sessionId,
+      design_image_id: null,
+      event_type: eventType,
+      provider,
+      model,
+      units: 1,
+      estimated_cost: estimatedCost,
+      metadata: metadata ?? {},
+      status: "reserved",
+      latency_ms: null,
+      error_code: null
+    };
+    const { error } = await admin.from("usage_events").insert({
+      id: usageEventId,
+      ...reservation
+    });
+
+    if (!error) {
+      return {
+        usageEventId,
+        dailyRemaining: Math.max(0, usage.dailyRemaining - 1),
+        monthlyRemaining: Math.max(0, usage.monthlyRemaining - 1)
+      };
+    }
+
+    if (error.code !== "23505") {
+      throw new UsageReservationError("Image credits could not be reserved.", error.message);
+    }
+
+    const { data: reclaimed } = await admin
+      .from("usage_events")
+      .update({
+        ...reservation,
+        created_at: new Date().toISOString()
+      })
+      .eq("id", usageEventId)
+      .eq("user_id", userId)
+      .eq("status", "failed")
+      .select("id")
+      .maybeSingle<{ id: string }>();
+
+    if (reclaimed?.id) {
+      return {
+        usageEventId,
+        dailyRemaining: Math.max(0, usage.dailyRemaining - 1),
+        monthlyRemaining: Math.max(0, usage.monthlyRemaining - 1)
+      };
+    }
+  }
+
+  throw new UsageReservationError("Image credits could not be reserved.", "USAGE_RESERVATION_CONFLICT");
 }
 
 export async function markUsageEventSucceeded({
@@ -574,6 +782,77 @@ function sumUnits(rows: Array<{ units: number | null }> | null) {
   return (rows ?? []).reduce((total, row) => total + (row.units ?? 0), 0);
 }
 
+function countValidBonusClaims(
+  rows: Array<{ id: string; metadata: unknown }> | null,
+  userId: string,
+  monthKey: string
+) {
+  const validClaimNumbers = new Set<number>();
+
+  for (const row of rows ?? []) {
+    if (!isRecord(row.metadata)) continue;
+
+    const claimNumber = row.metadata.claimNumber;
+    const credits = row.metadata.credits;
+    const claimedMonth = row.metadata.claimMonth;
+    const signature = row.metadata.signature;
+    if (
+      !Number.isInteger(claimNumber) ||
+      typeof claimNumber !== "number" ||
+      claimNumber < 1 ||
+      claimNumber > monthlyBonusClaimLimit ||
+      credits !== bonusCreditsPerClaim ||
+      claimedMonth !== monthKey ||
+      typeof signature !== "string"
+    ) {
+      continue;
+    }
+
+    const expectedId = signedUsageId(`bonus-claim:${userId}:${monthKey}:${claimNumber}`);
+    const expectedSignature = signBonusClaim(userId, monthKey, claimNumber);
+    if (row.id === expectedId && signature === expectedSignature) {
+      validClaimNumbers.add(claimNumber);
+    }
+  }
+
+  return validClaimNumbers.size;
+}
+
+function createBonusClaimMetadata(userId: string, monthKey: string, claimNumber: number) {
+  return {
+    kind: "image_credit_bonus_claim",
+    credits: bonusCreditsPerClaim,
+    claimMonth: monthKey,
+    claimNumber,
+    signature: signBonusClaim(userId, monthKey, claimNumber)
+  };
+}
+
+function signBonusClaim(userId: string, monthKey: string, claimNumber: number) {
+  return signUsageValue(`bonus-claim-signature:${userId}:${monthKey}:${claimNumber}:${bonusCreditsPerClaim}`);
+}
+
+function signedUsageId(value: string) {
+  const hex = signUsageValue(value).slice(0, 32);
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+function signUsageValue(value: string) {
+  if (!serverEnv.supabaseServiceRoleKey) {
+    throw new Error("Supabase service role key is required for signed usage records.");
+  }
+
+  return createHmac("sha256", serverEnv.supabaseServiceRoleKey).update(value).digest("hex");
+}
+
+function formatMonthKey(date: Date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 function createSessionTitle(profile: DesignProfile) {
   const parts = [profile.personalizationText, profile.fontPreference, profile.style, profile.diamondShape, profile.jewelryType].filter(Boolean);
   return parts.length ? parts.join(" ") : "Diamond Design Session";
@@ -583,6 +862,13 @@ export class UsageReservationError extends Error {
   constructor(message: string, readonly code: string) {
     super(message);
     this.name = "UsageReservationError";
+  }
+}
+
+export class BonusCreditClaimError extends Error {
+  constructor(message: string, readonly code: "BONUS_NOT_AVAILABLE" | "MONTHLY_BONUS_LIMIT_REACHED") {
+    super(message);
+    this.name = "BonusCreditClaimError";
   }
 }
 

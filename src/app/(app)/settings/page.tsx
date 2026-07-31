@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Gauge, Gem, Mail, ShieldCheck } from "lucide-react";
+import { Gauge, Gem, Mail, ShieldCheck, Sparkles } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/components/auth/auth-provider";
@@ -15,6 +15,10 @@ type UsageState = {
   monthlyLimit: number;
   dailyRemaining: number;
   monthlyRemaining: number;
+  bonusClaimsUsed: number;
+  bonusClaimsRemaining: number;
+  bonusCreditsGranted: number;
+  canClaimBonus: boolean;
 };
 
 export default function SettingsPage() {
@@ -22,6 +26,8 @@ export default function SettingsPage() {
   const { t } = useLanguage();
   const [usage, setUsage] = useState<UsageState | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [isClaimingBonus, setIsClaimingBonus] = useState(false);
+  const [bonusNotice, setBonusNotice] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
   useEffect(() => {
     if (!user) {
@@ -48,6 +54,58 @@ export default function SettingsPage() {
       mounted = false;
     };
   }, [getAccessToken, user]);
+
+  async function claimBonusCredits() {
+    if (!user || !usage?.canClaimBonus || isClaimingBonus) return;
+
+    setIsClaimingBonus(true);
+    setBonusNotice(null);
+
+    try {
+      const token = await getAccessToken();
+      const response = await fetch("/api/usage", {
+        method: "POST",
+        headers: token ? { Authorization: `Bearer ${token}` } : {}
+      });
+      const payload = (await response.json()) as {
+        usage?: UsageState;
+        error?: string;
+        code?: "BONUS_NOT_AVAILABLE" | "MONTHLY_BONUS_LIMIT_REACHED";
+      };
+
+      if (!response.ok || !payload.usage) {
+        const translatedError =
+          payload.code === "MONTHLY_BONUS_LIMIT_REACHED"
+            ? t(
+                "You've already used both bonus credit claims for this month.",
+                "لقد استخدمت بالفعل فرصتي الرصيد الإضافي لهذا الشهر."
+              )
+            : payload.code === "BONUS_NOT_AVAILABLE"
+              ? t(
+                  "Bonus credits become available when your daily or monthly credits reach zero.",
+                  "يتاح الرصيد الإضافي عند وصول رصيدك اليومي أو الشهري إلى الصفر."
+                )
+              : payload.error;
+        throw new Error(translatedError || t("Bonus credits could not be added.", "تعذرت إضافة الرصيد الإضافي."));
+      }
+
+      setUsage(payload.usage);
+      setBonusNotice({
+        type: "success",
+        text: t(
+          "2 extra image credits were added to your account.",
+          "تمت إضافة رصيدين إضافيين للصور إلى حسابك."
+        )
+      });
+    } catch (error) {
+      setBonusNotice({
+        type: "error",
+        text: error instanceof Error ? error.message : t("Bonus credits could not be added.", "تعذرت إضافة الرصيد الإضافي.")
+      });
+    } finally {
+      setIsClaimingBonus(false);
+    }
+  }
 
   return (
     <div className="space-y-8">
@@ -118,10 +176,54 @@ export default function SettingsPage() {
           <LimitNote icon={Gem} title={t("1 credit", "رصيد واحد")} description={t("Each generated concept, uploaded reference save, or edited image may count against image usage depending on the route.", "كل تصور منشأ أو مرجع محفوظ أو صورة معدلة قد يُحسب من رصيد الصور حسب نوع العملية.")} />
           <LimitNote icon={Gauge} title={t("Backend enforced", "مفروض من الخادم")} description={t("Limits are checked before AI image calls, so unavailable credits should stop expensive work early.", "يتم فحص الحدود قبل استدعاءات صور الذكاء الاصطناعي لإيقاف العمليات المكلفة مبكراً عند نفاد الرصيد.")} />
           <div className="rounded-2xl bg-black/25 p-4 shadow-[inset_0_0_0_1px_rgba(215,196,154,0.08)]">
-            <p className="font-display text-xl text-diamond-pearl">{t("Need more?", "تحتاج المزيد؟")}</p>
-            <p className="mt-2 text-sm leading-6 text-muted-foreground">{t("Contact the atelier administrator to adjust profile limits.", "تواصل مع مسؤول الأتيليه لتعديل حدود الحساب.")}</p>
-            <Button className="mt-4" variant="secondary" disabled>
-              {t("Managed by admin", "يديره المسؤول")}
+            <Sparkles className="h-5 w-5 text-diamond-champagne" />
+            <p className="font-display mt-4 text-xl text-diamond-pearl">{t("Need more credits?", "تحتاج إلى رصيد إضافي؟")}</p>
+            <p className="mt-2 text-sm leading-6 text-muted-foreground">
+              {!user
+                ? t("Sign in to use monthly bonus credits.", "سجل الدخول لاستخدام الرصيد الإضافي الشهري.")
+                : !usage
+                  ? t("Loading bonus credit availability...", "جارٍ تحميل الرصيد الإضافي المتاح...")
+                  : usage.bonusClaimsRemaining <= 0
+                    ? t(
+                        "You used both bonus claims. New claims become available next month.",
+                        "لقد استخدمت فرصتي الرصيد الإضافي. ستتاح فرص جديدة الشهر القادم."
+                      )
+                    : usage.canClaimBonus
+                      ? t(
+                          "Your limit is reached. Add 2 extra image credits now.",
+                          "لقد وصلت إلى الحد. أضف رصيدين إضافيين للصور الآن."
+                        )
+                      : t(
+                          `${usage.bonusClaimsRemaining} of 2 monthly claims remain. The button unlocks when your daily or monthly credits reach zero.`,
+                          `تبقى ${usage.bonusClaimsRemaining} من فرصتين شهريتين. يتاح الزر عند وصول رصيدك اليومي أو الشهري إلى الصفر.`
+                        )}
+            </p>
+            {usage ? (
+              <p className="mt-3 text-xs uppercase tracking-[0.18em] text-diamond-champagne/70">
+                {t(
+                  `${usage.bonusClaimsUsed}/2 bonus claims used this month`,
+                  `تم استخدام ${usage.bonusClaimsUsed}/2 من فرص الرصيد الإضافي هذا الشهر`
+                )}
+              </p>
+            ) : null}
+            {bonusNotice ? (
+              <p className={bonusNotice.type === "error" ? "mt-3 text-sm text-red-300" : "mt-3 text-sm text-diamond-champagne"}>
+                {bonusNotice.text}
+              </p>
+            ) : null}
+            <Button
+              className="mt-4"
+              variant="secondary"
+              disabled={!usage?.canClaimBonus || isClaimingBonus}
+              onClick={() => void claimBonusCredits()}
+            >
+              {isClaimingBonus
+                ? t("Adding credits...", "جارٍ إضافة الرصيد...")
+                : usage?.bonusClaimsRemaining === 0
+                  ? t("Monthly claims used", "تم استخدام فرص الشهر")
+                  : usage?.canClaimBonus
+                    ? t("Claim 2 extra credits", "احصل على رصيدين إضافيين")
+                    : t("Available when limit is reached", "يتاح عند الوصول إلى الحد")}
             </Button>
           </div>
         </CardContent>
