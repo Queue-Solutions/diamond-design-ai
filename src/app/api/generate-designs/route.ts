@@ -14,7 +14,7 @@ import {
   reserveImageCredit,
   requireAiAccess,
   requireAuthenticatedUser,
-  storeImageFromUrl,
+  storeGeneratedImageFromUrl,
   UsageReservationError
 } from "@/lib/supabase-server";
 import {
@@ -100,7 +100,7 @@ export async function POST(request: Request) {
           ...image,
           rootId: image.rootId || image.id
         };
-        const stored = await storeImageFromUrl({
+        const stored = await storeGeneratedImageFromUrl({
           url: normalizedImage.url,
           userId: auth.user.id,
           sessionId,
@@ -120,7 +120,14 @@ export async function POST(request: Request) {
           usageEventId: reservation.usageEventId,
           designImageId: record.id,
           latencyMs: Date.now() - startedAt,
-          metadata: { promptCount: prompts.length, storagePath: stored.storagePath, model: selectedModel, ...routingMetadata }
+          metadata: {
+            promptCount: prompts.length,
+            storagePath: stored.storagePath,
+            sourceStoragePath: stored.sourceStoragePath,
+            watermarked: true,
+            model: selectedModel,
+            ...routingMetadata
+          }
         });
 
         savedImages.push(await mapImageRecordToConcept(record));

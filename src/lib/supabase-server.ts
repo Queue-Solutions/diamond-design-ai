@@ -5,8 +5,10 @@ import { createAdminSupabaseClient } from "@/services/supabase/admin";
 import { createServerSupabaseClient } from "@/services/supabase/server";
 import {
   createSignedImageUrl,
+  getOriginalSourceStoragePath,
   refreshSignedUrlsForConcepts,
   uploadDataUrlToStorage,
+  uploadGeneratedImageUrlToStorage,
   uploadImageUrlToStorage
 } from "@/services/supabase/storage";
 import type { DesignProfile, GeneratedConcept } from "@/types/design";
@@ -703,6 +705,25 @@ export async function storeImageFromUrl({
   return { signedUrl: stored.signedUrl, storagePath: stored.storagePath };
 }
 
+export async function storeGeneratedImageFromUrl({
+  url,
+  userId,
+  sessionId,
+  imageId
+}: {
+  url: string;
+  userId: string;
+  sessionId: string;
+  imageId: string;
+}) {
+  const stored = await uploadGeneratedImageUrlToStorage({ url, userId, sessionId, imageId });
+  return {
+    signedUrl: stored.signedUrl,
+    storagePath: stored.storagePath,
+    sourceStoragePath: stored.sourceStoragePath
+  };
+}
+
 export async function storeImageFromDataUrl({
   dataUrl,
   userId,
@@ -765,7 +786,18 @@ export async function getEditableImageUrlForUser(userId: string, imageId: string
     .maybeSingle<{ image_url: string | null; storage_path: string | null }>();
 
   if (!data) return null;
-  if (data.storage_path) return createSignedImageUrl(data.storage_path);
+  if (data.storage_path) {
+    const originalSourcePath = getOriginalSourceStoragePath(data.storage_path);
+    if (originalSourcePath) {
+      try {
+        return await createSignedImageUrl(originalSourcePath);
+      } catch {
+        // Older images predate private source preservation and remain editable via their display copy.
+      }
+    }
+
+    return createSignedImageUrl(data.storage_path);
+  }
   return data.image_url ?? null;
 }
 

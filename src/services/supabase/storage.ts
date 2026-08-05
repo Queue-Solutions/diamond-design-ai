@@ -1,4 +1,5 @@
 import { createAdminSupabaseClient } from "./admin";
+import { applyIramWatermark } from "@/services/image/watermark";
 import type { GeneratedConcept } from "@/types/design";
 
 const designImagesBucket = "design-images";
@@ -10,7 +11,7 @@ export type StoredPrivateImage = {
   signedUrl: string;
 };
 
-export type StorageFolder = "images" | "uploads" | "exports";
+export type StorageFolder = "images" | "sources" | "uploads" | "exports";
 
 export function buildImageStoragePath({
   userId,
@@ -87,6 +88,43 @@ export async function uploadImageUrlToStorage({
   });
 }
 
+export async function uploadGeneratedImageUrlToStorage({
+  url,
+  userId,
+  sessionId,
+  imageId
+}: {
+  url: string;
+  userId: string;
+  sessionId: string;
+  imageId: string;
+}) {
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new StorageImageError("The generated image could not be downloaded for private storage.");
+  }
+
+  const contentType = normalizeImageContentType(response.headers.get("content-type"));
+  if (!allowedImageTypes.has(contentType)) {
+    throw new StorageImageError("The image provider returned an unsupported image format.");
+  }
+
+  const originalBytes = await response.arrayBuffer();
+  const watermarkedBytes = await applyIramWatermark(originalBytes);
+  const sourceStoragePath = buildImageStoragePath({ userId, sessionId, imageId, folder: "sources" });
+  const displayStoragePath = buildImageStoragePath({ userId, sessionId, imageId, folder: "images" });
+
+  const [, displayImage] = await Promise.all([
+    uploadImageToStorage({ bytes: originalBytes, contentType, storagePath: sourceStoragePath }),
+    uploadImageToStorage({ bytes: watermarkedBytes, contentType: "image/png", storagePath: displayStoragePath })
+  ]);
+
+  return {
+    ...displayImage,
+    sourceStoragePath
+  };
+}
+
 export async function uploadDataUrlToStorage({
   dataUrl,
   userId,
@@ -125,6 +163,10 @@ export async function createSignedImageUrl(storagePath: string, expiresIn = sign
   }
 
   return data.signedUrl;
+}
+
+export function getOriginalSourceStoragePath(storagePath: string) {
+  return storagePath.includes("/images/") ? storagePath.replace("/images/", "/sources/") : null;
 }
 
 export async function createSignedImageUrls(storagePaths: string[], expiresIn = signedUrlExpiresInSeconds) {
