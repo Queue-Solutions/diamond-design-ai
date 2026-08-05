@@ -12,6 +12,8 @@ import {
 } from "./provider";
 
 const requestTimeoutMs = 120_000;
+const safeJewelryRetryInstruction =
+  "The supplied reference and requested result are a commercial fine-jewelry product photograph only. Return only the same jewelry product on its studio background, with no people or unrelated subjects.";
 
 type ReplicateOutput =
   | string
@@ -82,14 +84,23 @@ export class ReplicateImageProvider implements ImageGenerationProvider {
     let output: ReplicateOutput;
     const model = request.model ?? imageModels.flux2Pro;
     try {
-      output = await withTimeout(
-        this.client.run(model, {
-          input: buildReplicateEditInput(model, request.prompt, request.imageUrl)
-        }) as Promise<ReplicateOutput>,
-        requestTimeoutMs
-      );
+      output = await this.runEdit(model, request.prompt, request.imageUrl);
     } catch (error) {
-      throw new ImageGenerationError(`Replicate image edit failed: ${getErrorMessage(error)}`);
+      if (!isSensitiveContentFalsePositive(error)) {
+        throw new ImageGenerationError(`Replicate image edit failed: ${getErrorMessage(error)}`);
+      }
+
+      try {
+        output = await this.runEdit(model, `${request.prompt}\n\n${safeJewelryRetryInstruction}`, request.imageUrl);
+      } catch (retryError) {
+        if (isSensitiveContentFalsePositive(retryError)) {
+          throw new ImageGenerationError(
+            "The image provider's safety filter could not complete this jewelry edit after an automatic retry. No image credit was used. Please try again."
+          );
+        }
+
+        throw new ImageGenerationError(`Replicate image edit retry failed: ${getErrorMessage(retryError)}`);
+      }
     }
 
     const url = extractImageUrl(output);
@@ -113,12 +124,27 @@ export class ReplicateImageProvider implements ImageGenerationProvider {
       createdAt: new Date().toISOString()
     };
   }
+
+  private runEdit(model: EditDesignProviderRequest["model"], prompt: string, imageUrl: string) {
+    const selectedModel = model ?? imageModels.flux2Pro;
+    return withTimeout(
+      this.client.run(selectedModel, {
+        input: buildReplicateEditInput(selectedModel, prompt, imageUrl)
+      }) as Promise<ReplicateOutput>,
+      requestTimeoutMs
+    );
+  }
 }
 
 function getErrorMessage(error: unknown) {
   if (error instanceof Error && error.message.trim()) return error.message;
   if (typeof error === "string" && error.trim()) return error;
   return "The image provider rejected the edit request.";
+}
+
+function isSensitiveContentFalsePositive(error: unknown) {
+  const message = getErrorMessage(error).toLowerCase();
+  return message.includes("e005") && message.includes("flagged as sensitive");
 }
 
 function summarizeEdit(instruction: string) {
